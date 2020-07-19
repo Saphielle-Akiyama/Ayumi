@@ -1,0 +1,2 @@
+# Ayumi
+Anime discord bot
