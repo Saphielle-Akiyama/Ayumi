@@ -1,0 +1,7 @@
+*.pyc
+*.json
+
+Ayumi/config.py
+
+.vscode/*
+env/*
