@@ -16,6 +16,19 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from .bot import Bot
-from .context import Context
-from .logger import WebhookHandler
+import core
+from discord.ext import commands
+
+class AyumiCommand(commands.Command):
+    """A subclassed command with some extra utils attributes"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.example_args = kwargs.get('example_args', None)
+        self.differs_in_nsfw = kwargs.get('differs_in_nsfw', False)
+
+    def get_example(self, ctx: core.Context):
+
+        for annotation in self.clean_params.values():
+
+            pass

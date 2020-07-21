@@ -1,0 +1,78 @@
+"""
+Ayumi - Anime discord bot
+Copyright (C) - 2020 | Saphielle Akiyama - saphielle.akiyama@gmail.com
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+import difflib
+from typing import List, Tuple, Callable, Optional
+
+from discord.ext import commands
+
+
+class Literal:
+    """
+    A converter that tries to match a literal set of values
+    """
+
+    @staticmethod
+    def get_ratio(left: str, right: str) -> Tuple[str, float]:
+        """Avoids having to stick everything in a single line"""
+        return left, difflib.SequenceMatcher(None, left, right).quick_ratio()
+
+    @staticmethod
+    def get_second(match: tuple) -> float:
+        """Didn't feel like using a lambda"""
+        return match[1]
+
+    def __class_getitem__(cls, values: tuple) -> Callable[[str], Optional[str]]:
+        """The converter factory"""
+        def actual_converter(arg: str) -> Optional[str]:
+            """The converter that we return"""
+
+            arg = arg.casefold()
+
+            # We got a full match
+
+            if arg in values:
+                return arg
+
+            # Might be an abbreviation
+
+            for v in values:
+                if v.startswith(arg):
+                    return v
+
+            # Using it's index (would make sense for months)
+
+            try:
+                return values[int(arg) - 1]
+            except (IndexError, ValueError):
+                pass
+
+            # Difflib
+
+            matches = [cls.get_ratio(compared, arg) for compared in values]
+            best_match, ratio = max(matches, default=None, key=cls.get_second)
+            if ratio > .75:
+                return best_match
+
+            # No match
+
+            message = f'Sorry ! I failed to match {arg} with an item in {values}'
+
+            raise commands.BadArgument(message=message)
+
+        return actual_converter

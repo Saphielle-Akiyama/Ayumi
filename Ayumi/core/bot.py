@@ -16,50 +16,87 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import logging
+
 import discord
 from discord.ext import commands
 
 import aiohttp
 import aioredis
 
+import core
+import config
+
 class Bot(commands.Bot):
+    
+    # Both of those are used as init
 
     def __init__(self, *args, **kwargs):
 
-        super().__init__(self, *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         self.load_extension('jishaku')
-
 
     async def connect(self, *args, **kwargs):
         """Used as an async alternative init"""
 
+        # Aiohttp
+
         self._session = session = aiohttp.ClientSession()
+
+        # Logging
 
         adapter = discord.AsyncWebhookAdapter(session)
 
-        self._logger = discord.Webhook.from_url(config.LOGGER_URL, adapter=adapter)
+        self._webhook = webhook = discord.Webhook.from_url(config.LOGGER_URL, adapter=adapter)
+
+        self._logger = logger = logging.getLogger('discord')
+
+        logger.setLevel(config.LOGGING_LEVEL)
+
+        handler = core.WebhookHandler(webhook, level=config.LOGGING_LEVEL)
+        
+        logger.addHandler(handler)
+
+        # Redis
 
         self._redis = await aioredis.create_redis_pool('redis://localhost')
+        
+        # Finalize
+
+        logger.info('Finishing initializing')
 
         return await super().connect(*args, **kwargs)
 
+
     # Let's avoid accidentally modifying those
+
+
+    @property
+    def logger(self) -> logging.Logger:
+        return self._logger
+
+    @property
+    def redis(self) -> aioredis.Redis:
+        return self._redis
 
     @property
     def session(self) -> aiohttp.ClientSession:
         return self._session
 
-
     @property
-    def redis(self) -> aioredis.Redis:
-        return self._redis
+    def webhook(self) -> discord.Webhook:
+        return self._webhook
+
+
+    # Cleanup
 
 
     async def close(self):
         """Close all of our external connections"""
 
         self.redis.close()
+
         await self._session.close()
 
         return await super().close()

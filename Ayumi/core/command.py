@@ -16,6 +16,14 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from .bot import Bot
-from .context import Context
-from .logger import WebhookHandler
+from discord.ext import commands
+
+
+class Command(commands.Command):
+    """Differs in nsfw kwarg"""
+    
+    def __init__(self, *args, **kwargs):
+        
+        super().__init__(*args, **kwargs)
+        
+        self.differs_in_nsfw_channel = kwargs.get('differs_in_nsfw_channel', False) 

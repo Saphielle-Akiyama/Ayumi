@@ -17,3 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import config
+import core
+import utils
+import logging
+
+if __name__ == '__main__':
+    bot = core.Bot(**config.DEFAULT_PARAMETERS)
+    bot.run(config.DISCORD_TOKEN)    
+
