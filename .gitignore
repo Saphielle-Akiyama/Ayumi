@@ -4,4 +4,6 @@
 Ayumi/config.py
 
 .vscode/*
+
 env/*
+wsl_env/*
