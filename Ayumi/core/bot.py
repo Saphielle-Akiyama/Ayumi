@@ -17,60 +17,60 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import logging
+import traceback
+import inspect
+from typing import Union
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import aiohttp
 import aioredis
 
 import core
 import config
+import utils
+
+from . import context
+from . import fallback
+
+LOGGING_LEVEL = logging.INFO
+EVENT_ERROR_TEMPLATE = "Exception occured in event %s :\n%s"
+COMMAND_ERROR_TEMPLATE = "Exception occured in command %s\n\nCalled with: \"%s\"\n\n%s"
+
 
 class Bot(commands.Bot):
-    
-    # Both of those are used as init
-
     def __init__(self, *args, **kwargs):
-
         super().__init__(*args, **kwargs)
-
         self.load_extension('jishaku')
+        self._session = None
+        self._webhook = None
+        self._logger = None
+        self._redis = None
 
     async def connect(self, *args, **kwargs):
         """Used as an async alternative init"""
-
-        # Aiohttp
-
         self._session = session = aiohttp.ClientSession()
-
-        # Logging
-
-        adapter = discord.AsyncWebhookAdapter(session)
-
-        self._webhook = webhook = discord.Webhook.from_url(config.LOGGER_URL, adapter=adapter)
 
         self._logger = logger = logging.getLogger('discord')
 
-        logger.setLevel(config.LOGGING_LEVEL)
-
-        handler = core.WebhookHandler(webhook, level=config.LOGGING_LEVEL)
-        
+        adapter = discord.AsyncWebhookAdapter(session)
+        self._webhook = discord.Webhook.from_url(config.LOGGER_URL, adapter=adapter)
+        logger.setLevel(LOGGING_LEVEL)
+        handler = core.WebhookHandler(self, level=LOGGING_LEVEL)
         logger.addHandler(handler)
-
-        # Redis
-
-        self._redis = await aioredis.create_redis_pool('redis://localhost')
         
-        # Finalize
+        try:
+            self._redis = await aioredis.create_redis_pool('redis://localhost')
+        except Exception as e:
+            self._redis = fallback.Fallback()
+            self.dispatch("error", exception=e)
+        else:
+            logger.info('Connected to redis')
 
         logger.info('Finishing initializing')
 
         return await super().connect(*args, **kwargs)
-
-
-    # Let's avoid accidentally modifying those
-
 
     @property
     def logger(self) -> logging.Logger:
@@ -88,15 +88,39 @@ class Bot(commands.Bot):
     def webhook(self) -> discord.Webhook:
         return self._webhook
 
+    # Error handling
 
-    # Cleanup
+    async def on_error(self, event: str, *args, **kwargs):
+        """Sends errors over a webhook"""
+        if exc := kwargs.get('exception'):
+            clean_tb = utils.clean_tb_from_exc(exc)
+        else:
+            tb = traceback.format_exc()
+            clean_tb = utils.clean_tb(tb)
 
+        self.logger.error(EVENT_ERROR_TEMPLATE, event, clean_tb)
+    
+    async def on_command_error(self, ctx: context.Context, error: Exception):
+        """Logs errors for command, then send them into the user"""
+        error = getattr(error, "original", error)
+       
+        clean_tb = utils.clean_tb_from_exc(error)
+        self.logger.warn(
+            COMMAND_ERROR_TEMPLATE, 
+            ctx.command.qualified_name,
+            ctx.message.content,
+            clean_tb
+        )
+        
+        error_summary = str(error)
+        await ctx.send(error_summary)
 
     async def close(self):
         """Close all of our external connections"""
-
         self.redis.close()
+        self.logger.info('Closed redis')
 
-        await self._session.close()
+        await super().close()
+        
+        self.logger.info('Finished closing the whole bot')
 
-        return await super().close()

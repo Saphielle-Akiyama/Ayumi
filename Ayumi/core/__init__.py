@@ -19,3 +19,4 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from .bot import Bot
 from .context import Context
 from .logger import WebhookHandler
+from .command import command, group

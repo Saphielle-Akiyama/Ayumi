@@ -21,9 +21,37 @@ from discord.ext import commands
 
 class Command(commands.Command):
     """Differs in nsfw kwarg"""
-    
     def __init__(self, *args, **kwargs):
-        
         super().__init__(*args, **kwargs)
-        
         self.differs_in_nsfw_channel = kwargs.get('differs_in_nsfw_channel', False) 
+
+
+def command(name=None, cls=Command, **attrs):
+    """Use our subclass by default"""
+    return commands.command(name=name, cls=cls, **attrs)
+
+class Group(Command, commands.Group):
+    """Copypaste of the superclass to use our subclassed stuff"""
+    def group(self, *args, **kwargs):
+        def decorator(func):
+            kwargs.setdefault('parent', self)
+            result = group(*args, **kwargs)(func)
+            self.add_command(result)
+            return result
+        return decorator
+
+    def command(self, *args, **kwargs):
+        def decorator(func):
+            kwargs.setdefault('parent', self)
+            result = command(*args, **kwargs)(func)
+            self.add_command(result)
+            return result
+        return decorator
+
+def group(name=None, **attrs):
+    """
+    Copypaste of the commands.group to use our superclass
+    without having to explicitely pass cls everywhere
+    """
+    attrs.setdefault('cls', Group)
+    return command(name=name, **attrs)

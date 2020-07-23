@@ -19,9 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import asyncio
 import datetime
 import logging
+from typing import List
 
 import discord
+from discord.ext import commands
 
+import utils
+from . import bot
 
 COLORS = {
     "DEBUG": discord.Color.blue(),
@@ -31,44 +35,56 @@ COLORS = {
     "CRITICAL": discord.Color.dark_red(),
 }
 
+NEED_FULL_MESSAGE = {"ERROR", "CRITICAL"}
+MAGNIFYING_GLASS = "\U0001f50e"
+
 
 class WebhookHandler(logging.Handler):
-    def __init__(self, webhook: discord.Webhook, *, level: int = logging.NOTSET):
-
+    def __init__(self, bot: bot.Bot, *, level: int = logging.NOTSET):
         super().__init__(level)
+        self.webhook = bot.webhook
+        self.bot = bot
+        self.loop = bot.loop
+        self.queue = asyncio.Queue() 
+        coro = self.send_webhooks()
+        self.loop.create_task(coro)
 
-        self.webhook = webhook
+    async def send_webhooks(self):
+        """
+        Sends webhooks to the log channel,
+        tries to send them in one message if possible
+        """
+        while not self.bot.is_closed():
+            embed = await self.queue.get()
+            embeds = [embed]
 
-        self.loop = asyncio.get_event_loop() 
+            await asyncio.sleep(1)
+            
+            queue_size = self.queue.qsize()
+            
+            amount_to_get = min(queue_size, 9)
+
+            for _ in range(amount_to_get):
+                embed = self.queue.get_nowait()
+                embeds.append(embed)
+            
+            await self.webhook.send(embeds=embeds)
+
 
     def emit(self, record: logging.LogRecord):
         """
-        Sends as webhook into the logging channel
+        Formats the record then sends it
         """
-        # Embed 
+        paginator = commands.Paginator(prefix="```py")
+        formatted = record.msg % record.args
 
-        title = f"Logging from {record.filename}"
-
-        description = "```" + record.msg % record.args + "```"
-
-        color = COLORS.get(record.levelname)
-        
-        timestamp = datetime.datetime.now(datetime.timezone.utc)
-
-        embed = discord.Embed(
-
-            title=title, 
-
-            description=description, 
-
-            color=color,
-
-            timestamp=timestamp
+        embed = utils.LongEmbed(
+            title="[{0.levelname}] handled by {0.filename} in {0.funcName}".format(record),
+            color=COLORS.get(record.levelname),
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+            description=formatted,
+            prefix="```py"
         )
 
-        # Send
-
-        coro = self.webhook.send(embed=embed)
-
-        self.loop.create_task(coro)
+        self.queue.put_nowait(embed)
 

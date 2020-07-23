@@ -16,6 +16,22 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from .converters import *
-from .embeds import * 
-from .tracebacks import *
+import asyncio
+
+class Fallback:
+    """
+    A class designed to handle (some)  operations without raising any errors
+    """
+    __slots__ = ()
+    
+    def __call__(self, *args, **kwargs):
+        return self
+    
+    __getattr__ = __getitem__ = __setitem__ = __call__
+
+    def __await__(self, *args, **kwargs):
+        return asyncio.sleep(0, self).__await__()
+
+    def __bool__(self):
+        return False
+

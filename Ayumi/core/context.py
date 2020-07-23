@@ -16,6 +16,8 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+from typing import Optional
+
 import discord
 from discord.ext import commands
 
@@ -29,22 +31,16 @@ class Context(commands.Context):
     @property
     def all_args(self) -> str:
         """Retrieves all user input args"""
-
         args = self.args[2:] if self.command.cog else self.args[1:]
-
         kwargs = list(self.kwargs.values())
-
         return ' '.join(args + kwargs)
 
     @property
-    def nsfw_key(self) -> bool:
+    def nsfw_key(self) -> Optional[bool]:
         """Checks if the command differs in nsfw channels"""
-        key = None
-
         if self.command.differs_in_nsfw:
             return self.channel.is_nsfw()
-
-        return key
+        return None
 
     @property
     def cache_key(self) -> str:
@@ -58,3 +54,4 @@ class Context(commands.Context):
             raise TypeError("New cache key must be a string")
 
         self._altered_cache_key = value
+
