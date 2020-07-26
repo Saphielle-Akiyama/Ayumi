@@ -1,2 +1,2 @@
 # Ayumi
-Anime discord bot
+Rewrite
