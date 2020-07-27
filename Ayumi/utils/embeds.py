@@ -18,12 +18,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import random
 import math
+import re
 
 import discord
 from discord.ext import commands
 from jishaku import codeblocks
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
+
+
+MARKDOWN_URL_REGEX = re.compile(r"\[(?P<visible_name>.+)\]\(.+\)")
 
 
 class Embed(discord.Embed):
@@ -59,6 +63,30 @@ class Embed(discord.Embed):
             self.add_field(name='\u200b', value='\u200b')
 
         return self
+   
+    @staticmethod
+    def return_visible_part(match: re.Match):
+        """Returns only the visible name"""
+        return match.group('visible_name')
+
+    def default_field_sort_key(self, field: dict) -> int:
+        """Returns the field value's visible length, accounts for url markdown"""
+        value = field['value']
+
+        cleaned_value = re.sub(MARKDOWN_URL_REGEX, self.return_visible_part, value) 
+        return len(cleaned_value) * -1   # we want the biggest one first without using the 
+                                         # reversed flag so other keys don't have to do it too
+
+    def sort_fields(self, key: Optional[Callable] = None):
+        """
+        Sorts the embed's fields according to a key, the callable
+        must take a dict containing, the field's name, value and inline state
+        returns self for fluid chaining
+        """
+        key = key or self.default_field_sort_key
+        sorted_fields = sorted(self._fields, key=key)
+        self._fields = [*sorted_fields]
+        return self
 
 
 class LongEmbed(Embed):
@@ -66,7 +94,6 @@ class LongEmbed(Embed):
     def remove_codeblocks(self, page: str):
         """Removes the prefix and suffix to replace them properly"""
         _, content = codeblocks.codeblock_converter(page)
-
         return content.strip()
 
     def __init__(self, **options):

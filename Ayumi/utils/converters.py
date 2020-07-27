@@ -65,8 +65,8 @@ class Literal:
             # Difflib
 
             matches = [cls.get_ratio(compared, arg) for compared in values]
-            best_match, ratio = max(matches, default=None, key=cls.get_second)
-            if ratio > .75:
+            best_match, best_ratio = max(matches, default=None, key=cls.get_second)
+            if best_ratio > .75:
                 return best_match
 
             # No match

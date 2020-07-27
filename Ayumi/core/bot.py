@@ -16,6 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import pathlib
 import logging
 import traceback
 import inspect
@@ -36,7 +37,7 @@ from . import fallback
 
 LOGGING_LEVEL = logging.INFO
 EVENT_ERROR_TEMPLATE = "Exception occured in event %s :\n%s"
-COMMAND_ERROR_TEMPLATE = "Exception occured in command %s\n\nCalled with: \"%s\"\n\n%s"
+COMMAND_ERROR_TEMPLATE = "Exception occured in command \"%s\"\n\nCalled with: \"%s\"\n\n%s"
 
 
 class Bot(commands.Bot):
@@ -67,6 +68,19 @@ class Bot(commands.Bot):
             self.dispatch("error", exception=e)
         else:
             logger.info('Connected to redis')
+
+
+        for file in pathlib.Path('./extensions').glob('**/*.py'):
+
+            ext_path = '.'.join(file.parts[:-1]) + '.' + file.stem
+
+            try:
+                self.load_extension(ext_path)
+            except Exception as e:
+                self.dispatch("error", exception=e)
+            else:
+                logger.info('Loaded %s', ext_path)
+
 
         logger.info('Finishing initializing')
 
@@ -107,7 +121,7 @@ class Bot(commands.Bot):
         clean_tb = utils.clean_tb_from_exc(error)
         self.logger.warn(
             COMMAND_ERROR_TEMPLATE, 
-            ctx.command.qualified_name,
+            str(ctx.command),
             ctx.message.content,
             clean_tb
         )
