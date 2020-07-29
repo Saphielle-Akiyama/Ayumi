@@ -72,7 +72,6 @@ class Embed(discord.Embed):
     def default_field_sort_key(self, field: dict) -> int:
         """Returns the field value's visible length, accounts for url markdown"""
         value = field['value']
-
         cleaned_value = re.sub(MARKDOWN_URL_REGEX, self.return_visible_part, value) 
         return len(cleaned_value) * -1   # we want the biggest one first without using the 
                                          # reversed flag so other keys don't have to do it too

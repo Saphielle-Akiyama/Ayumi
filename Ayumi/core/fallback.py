@@ -20,7 +20,7 @@ import asyncio
 
 class Fallback:
     """
-    A class designed to handle (some)  operations without raising any errors
+    A class designed to handle (some) operations without raising any errors
     """
     __slots__ = ()
     

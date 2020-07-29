@@ -16,7 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import operator
 import datetime as dt
 import json
-from typing import Union, Any, Generator, Tuple
+from typing import Union, Any, Generator, Tuple, Optional
 
 import discord
 from discord.ext import commands, menus
@@ -25,17 +25,6 @@ import pycountry
 
 import core
 import utils
-
-class MalError(commands.CommandError):
-    """Base exception for mal related errors"""
-
-class NoResultsError(MalError):
-    def __init__(self, query: str):
-        self.query = query
-
-    def __str__(self):
-        return "Sorry ! I couldn't find any result for the query " + self.query
-
 
 
 class PresetMenuPages(menus.MenuPages):
@@ -48,6 +37,11 @@ class PresetSource(menus.ListPageSource):
         super().__init__(entries, per_page=1)
 
 class MediaSource(PresetSource):
+    
+    @staticmethod
+    def join_data(data: list) -> Optional[str]:
+        """Jons the data or returns none if there isn't any"""
+        return '\n'.join(data) or None
 
     # Airing info
 
@@ -71,12 +65,10 @@ class MediaSource(PresetSource):
                 natural = '/'.join(filtered)
 
             if natural:
-                yield f"**{verb}**: {natural}"
-            else:
-                yield None
+                yield f"**{verb}**\n{natural}"
 
     @staticmethod
-    def format_airing_dates(data: int) -> Tuple[dt.datetime, str]:
+    def format_airing_dates(data: dict) -> Tuple[dt.datetime, str]:
         """
         Returns the next airing as a datetime object
         as well as the duration until it in a human datetime
@@ -95,19 +87,61 @@ class MediaSource(PresetSource):
         natural_time_until_airing = humanize.naturaldelta(time_until_airing)
         f_time_until_airing = f"**Next airing**: {natural_time_until_airing}"
         return airing_at, f_time_until_airing
+    
+    @staticmethod
+    def format_meta(data: dict) -> Generator[str, None, None]:
+        """Formats metrics"""
+        to_get = ('episodes', 'duration', 'chapters', 'volumes', 'source')
+        infos = operator.itemgetter(*to_get)(data)
+        
+        for name, info in zip(to_get, infos):
+            if info:
+                name = name.lower().title()
+                info = info.lower().title() if isinstance(info, str) else info
+                line = f"**{name}**: {info}"
+
+                if name == 'duration':
+                    line += ' min'
+
+                yield line
+    
+    @staticmethod
+    def format_community(data: dict):
+        """Formats community ratings"""
+        to_get = ('averageScore', 'popularity', 'favourites')
+
+        avg_score, popularity, favourites = operator.itemgetter(*to_get)(data)
+        
+        if avg_score:
+            yield f"**Score**: {avg_score}/100"
+
+        if popularity:
+            yield f"**Watchlists**: {popularity}"
+
+        if favourites:
+            yield f"**Favourites**: {favourites}"
 
 
     def format_page(self, menu: PresetMenuPages, data: dict) -> utils.Embed:
         main_title = data['title']['english'] or data['title']['romaji']
         title = f"[{data['format']}] {main_title}"
         description = utils.remove_html_tags(data['description'])
-        color = int(data['coverImage']['color'][1:], 16)
-        embed = utils.Embed(title=title, description=description, color=color)
+        embed = utils.Embed(title=title, description=description)
         
-        # Images
-        embed.set_image(url=data['bannerImage'])
-        embed.set_thumbnail(url=data['coverImage']['extraLarge'])
+        color_hex = data['coverImage']['color']
+        if color_hex:
+            embed.color = int(color_hex[1:], 16)
 
+        # Images
+        img_url = data['bannerImage']
+        if img_url is not None:
+            embed.set_image(url=img_url)
+
+        thumbnail_url = data['coverImage']['extraLarge']
+
+        if thumbnail_url is not None:
+            embed.set_thumbnail(url=thumbnail_url)
+        
         # Airing infos
         boundary_dates = operator.itemgetter('startDate', 'endDate')(data)
         f_boundary_dates = self.format_boundary_dates(boundary_dates)
@@ -121,22 +155,31 @@ class MediaSource(PresetSource):
         if f_season:
             cap_season = f_season.lower().title()
             f_season = f"**Season**: {cap_season}"
-
-        country_of_origin = pycountry.countries.get(alpha_2=data['countryOfOrigin'])
-        f_country_of_origin = f"**Country**: {country_of_origin.name}"
-        dates = [*f_boundary_dates, f_time_until_airing, f_season, f_country_of_origin]
+        
+        status = data['status'].lower().replace('_', ' ').title()
+        f_status = f"**Status**: {status}"
+        dates = [*f_boundary_dates, f_time_until_airing, f_season, f_status]
         filtered_dates = filter(None, dates)
-        formatted_dates = '- ' + '\n- '.join(filtered_dates)
-        embed.add_field(name='Airing', value=formatted_dates)
+        formatted_dates = self.join_data(filtered_dates)
+        if formatted_dates:
+            embed.add_field(name='Airing', value=formatted_dates)
 
-
-
-
-
-
-
-        return embed
-
+        # Some meta info
+        country_of_origin = pycountry.countries.get(alpha_2=data['countryOfOrigin'])
+        f_country_of_origin = f"**Origin**: {country_of_origin.name}"
+ 
+        meta = [*self.format_meta(data), f_country_of_origin]
+        f_meta = self.join_data(meta)
+        if f_meta is not None:
+            embed.add_field(name='Meta', value=f_meta)
+        
+        # Community 
+        community = self.format_community(data)
+        f_community = self.join_data(community)
+        if f_community is not None:
+            embed.add_field(name='Community', value=f_community)
+        
+        return embed.sort_fields()
 
 
 class Anilist(commands.Cog):
@@ -161,20 +204,18 @@ class Anilist(commands.Cog):
 
             return resp
 
-    @commands.command()
+    @commands.command(aliases=['anime', 'manga'])
     async def media(self, ctx: core.Context, *, query: str):
-
-        json_query = '''
+        """Looks for infos about an anime or a manga"""
+        json_query = """
         query ($page: Int, $perPage: Int, $search: String, $asHtml: Boolean) {
             Page (page: $page, perPage: $perPage) {
                 media (search: $search) {
-                    
                     bannerImage
                     coverImage {
                         extraLarge
                         color
                     }
-
                     title {
                         english
                         romaji
@@ -198,12 +239,21 @@ class Anilist(commands.Cog):
                     }
                     season
                     countryOfOrigin
+                    status
                     
+                    episodes 
+                    duration
+                    chapters
+                    volumes
+                    source
 
+                    averageScore
+                    popularity
+                    favourites
                 }
             }
         }
-        '''
+        """ 
         variables = {
             'search': query,
             'pag': 1,

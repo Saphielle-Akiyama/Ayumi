@@ -62,3 +62,16 @@ def remove_html_tags(arg: str) -> str:
     """Removes all html tags for a string, option seems weird"""
     return re.sub(HTML_TAG_REGEX, '', arg)
 
+def split_by_caps(char: str) -> str:
+    """Helper function that returns a whitespace + the lowercase letter
+    if the char is lower"""
+    if char.islower():
+        return char
+    lower = char.lower()
+    return f" {lower}"
+
+def camelcase_to_natural(arg: str) -> str:
+    """camelCase -> camel case"""
+    mapped = map(split_by_caps, arg)
+    return ''.join(mapped)
+

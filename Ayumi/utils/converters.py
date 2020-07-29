@@ -16,10 +16,13 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import operator
 import difflib
 from typing import List, Tuple, Callable, Optional
 
 from discord.ext import commands
+
+import core
 
 
 class Literal:
@@ -31,11 +34,6 @@ class Literal:
     def get_ratio(left: str, right: str) -> Tuple[str, float]:
         """Avoids having to stick everything in a single line"""
         return left, difflib.SequenceMatcher(None, left, right).quick_ratio()
-
-    @staticmethod
-    def get_second(match: tuple) -> float:
-        """Didn't feel like using a lambda"""
-        return match[1]
 
     def __class_getitem__(cls, values: tuple) -> Callable[[str], Optional[str]]:
         """The converter factory"""
@@ -65,7 +63,7 @@ class Literal:
             # Difflib
 
             matches = [cls.get_ratio(compared, arg) for compared in values]
-            best_match, best_ratio = max(matches, default=None, key=cls.get_second)
+            best_match, best_ratio = max(matches, default=None, key=operator.itemgetter(1))
             if best_ratio > .75:
                 return best_match
 
@@ -76,3 +74,5 @@ class Literal:
             raise commands.BadArgument(message=message)
 
         return actual_converter
+
+

@@ -62,7 +62,9 @@ class Bot(commands.Bot):
         logger.addHandler(handler)
         
         try:
-            self._redis = await aioredis.create_redis_pool('redis://localhost')
+            self._redis = await aioredis.create_redis_pool(config.REDIS_URL, 
+                                                           password=config.REDIS_PASSWORD
+                                                           )
         except Exception as e:
             self._redis = fallback.Fallback()
             self.dispatch("error", exception=e)
@@ -126,8 +128,7 @@ class Bot(commands.Bot):
             clean_tb
         )
         
-        error_summary = str(error)
-        await ctx.send(error_summary)
+        await ctx.send(f"{error.__class__.__name__}: {error}")
 
     async def close(self):
         """Close all of our external connections"""
