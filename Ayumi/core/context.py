@@ -24,9 +24,12 @@ from discord.ext import commands
 
 class Context(commands.Context):
     @property
-    def all_args(self) -> str:
+    def all_args(self) -> list:
         """Retrieves all user input args"""
         args = self.args[2:] if self.command.cog else self.args[1:]
         kwargs = [*self.kwargs.values()]
         return args + kwargs
-
+    
+    @property
+    def is_nsfw(self) -> bool:
+        return self.channel.is_nsfw()

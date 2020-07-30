@@ -26,10 +26,68 @@ import pycountry
 import core
 import utils
 
+# This should be formatted with %s to avoid fstring or .format issues
+QUERY_TEMPLATE = """
+query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
+    Page (page: $page, perPage: $perPage) {
+        media (%s) {
+            isAdult
+            bannerImage
+            coverImage {
+                extraLarge
+                color
+            }
+            title {
+                english
+                romaji
+            }
+            format
+            description(asHtml: $asHtml)
+
+            startDate {
+                day
+                month
+                year
+            }
+            endDate {
+                day
+                month
+                year
+            }
+            nextAiringEpisode {
+                airingAt
+                timeUntilAiring
+            }
+            season
+            countryOfOrigin
+            status
+
+            episodes
+            duration
+            chapters
+            volumes
+            source
+
+            averageScore
+            popularity
+            favourites
+            trending
+        }
+    }
+}
+"""
+
+DM_CHANNEL_URL_TEMPLATE = "https://discordapp.com/channels/@me/{}/"
+
 
 class PresetMenuPages(menus.MenuPages):
     def __init__(self, source: menus.ListPageSource, **options):
         super().__init__(source, delete_message_after=True, timeout=60)
+        self.pages_added_to_calendar = set()
+
+    @menus.button("\U0001f5d3", position=menus.Last(2))  # calendar
+    async def on_calendar(self, payload: discord.RawReactionActionEvent):
+        pass
 
 
 class PresetSource(menus.ListPageSource):
@@ -37,18 +95,17 @@ class PresetSource(menus.ListPageSource):
         super().__init__(entries, per_page=1)
 
 class MediaSource(PresetSource):
-    
     @staticmethod
     def join_data(data: list) -> Optional[str]:
         """Jons the data or returns none if there isn't any"""
-        return '\n'.join(data) or None
+        return '\n\n'.join(data) or None
 
     # Airing info
 
     @staticmethod
     def format_boundary_dates(data: Tuple[dict]) -> str:
         """Formats the date into something nicer"""
-        verbs = ('Started', 'Finished')
+        verbs = ('Start', 'End')
 
         for verb, boundary in zip(verbs, data):
             if not all(v for v in boundary.items()):
@@ -56,12 +113,14 @@ class MediaSource(PresetSource):
 
             date_info = operator.itemgetter('year', 'month', 'day')(boundary)
 
+            natural = None
+
             if all(date_info):
                 date = dt.datetime(*date_info)
-                natural = humanize.naturaldate(date)
+                natural = date.strftime("%d %b %Y")
 
-            else:
-                filtered = [str(d) for d in date_info if d]
+            elif any(date_info):
+                filtered = [f"{d:02}" if d else '00' for d in reversed(date_info)]
                 natural = '/'.join(filtered)
 
             if natural:
@@ -80,105 +139,119 @@ class MediaSource(PresetSource):
             return None, None
 
         airing_at, time_until_airing = getter(next_airing_episode)
-
         airing_at = dt.datetime.fromtimestamp(airing_at)
 
-        time_until_airing = dt.timedelta(seconds=time_until_airing)
-        natural_time_until_airing = humanize.naturaldelta(time_until_airing)
-        f_time_until_airing = f"**Next airing**: {natural_time_until_airing}"
-        return airing_at, f_time_until_airing
-    
+        delta = dt.datetime.now() + dt.timedelta(seconds=time_until_airing)
+        f_airing_time = airing_at.strftime("**Next airing**\n%d %B %Y %H:%M UTC")
+
+        return airing_at, f_airing_time
+
     @staticmethod
     def format_meta(data: dict) -> Generator[str, None, None]:
         """Formats metrics"""
         to_get = ('episodes', 'duration', 'chapters', 'volumes', 'source')
         infos = operator.itemgetter(*to_get)(data)
-        
+
         for name, info in zip(to_get, infos):
             if info:
                 name = name.lower().title()
-                info = info.lower().title() if isinstance(info, str) else info
-                line = f"**{name}**: {info}"
 
-                if name == 'duration':
-                    line += ' min'
+                if name == 'Duration':
+                    delta = dt.timedelta(minutes=info)
+                    info = humanize.naturaldelta(delta)
+
+                elif isinstance(info, str):
+                    info = info.lower().replace('_', ' ').title() 
+
+                line = f"**{name}**\n{info}"
 
                 yield line
-    
+
     @staticmethod
     def format_community(data: dict):
         """Formats community ratings"""
-        to_get = ('averageScore', 'popularity', 'favourites')
+        to_get = ('averageScore', 'popularity', 'favourites', 'trending')
 
-        avg_score, popularity, favourites = operator.itemgetter(*to_get)(data)
-        
+        avg_score, popularity, favourites, related_actions = operator.itemgetter(*to_get)(data)
+
         if avg_score:
-            yield f"**Score**: {avg_score}/100"
+            yield f"**Score**\n{avg_score}/100"
 
         if popularity:
-            yield f"**Watchlists**: {popularity}"
+            yield f"**Watchlists**\n{popularity}"
 
         if favourites:
-            yield f"**Favourites**: {favourites}"
+            yield f"**Favourites**\n{favourites}"
 
+        if related_actions:
+            yield f"**Related actions\nin the past hour**\n{related_actions}"
 
     def format_page(self, menu: PresetMenuPages, data: dict) -> utils.Embed:
+        embed = utils.Embed()
+
         main_title = data['title']['english'] or data['title']['romaji']
-        title = f"[{data['format']}] {main_title}"
-        description = utils.remove_html_tags(data['description'])
-        embed = utils.Embed(title=title, description=description)
-        
-        color_hex = data['coverImage']['color']
-        if color_hex:
+
+        f_is_adult = "18+ " if data['isAdult'] else ''
+        embed.title = f"[{f_is_adult}{data['format']}] {main_title}"
+
+        embed.description = utils.remove_html_tags(data['description'] or '')
+
+        if color_hex := data['coverImage']['color']:
             embed.color = int(color_hex[1:], 16)
 
         # Images
-        img_url = data['bannerImage']
-        if img_url is not None:
+        if img_url := data['bannerImage']:
             embed.set_image(url=img_url)
 
-        thumbnail_url = data['coverImage']['extraLarge']
-
-        if thumbnail_url is not None:
+        if thumbnail_url := data['coverImage']['extraLarge']:
             embed.set_thumbnail(url=thumbnail_url)
-        
+
         # Airing infos
         boundary_dates = operator.itemgetter('startDate', 'endDate')(data)
         f_boundary_dates = self.format_boundary_dates(boundary_dates)
-        airing_at, f_time_until_airing = self.format_airing_dates(data)
-
-        if airing_at is not None:
-            embed.set_footer(text="The next airing releases on :")
-            embed.timestamp = airing_at
-
-        f_season = data['season']
-        if f_season:
-            cap_season = f_season.lower().title()
-            f_season = f"**Season**: {cap_season}"
+        airing_at, f_airing_time = self.format_airing_dates(data)
         
+        # special thing for the footer
+        max_pages = self.get_max_pages()
+        footer = f"Page {menu.current_page + 1} out of {max_pages}"
+        if airing_at:
+            embed.timestamp = airing_at
+            footer += " | Live counter until next release :"
+
+        embed.set_footer(text=footer)
+
+        if f_season := data['season']:
+            cap_season = f_season.lower().title()
+            f_season = f"**Season**\n{cap_season}"
+
         status = data['status'].lower().replace('_', ' ').title()
-        f_status = f"**Status**: {status}"
-        dates = [*f_boundary_dates, f_time_until_airing, f_season, f_status]
+        f_status = f"**Status**\n{status}"
+        dates = [*f_boundary_dates, f_airing_time, f_season, f_status]
         filtered_dates = filter(None, dates)
         formatted_dates = self.join_data(filtered_dates)
         if formatted_dates:
-            embed.add_field(name='Airing', value=formatted_dates)
+            embed.add_field(name="\u200b", value=formatted_dates)
 
         # Some meta info
         country_of_origin = pycountry.countries.get(alpha_2=data['countryOfOrigin'])
-        f_country_of_origin = f"**Origin**: {country_of_origin.name}"
- 
+        f_country_of_origin = f"**Country of origin**\n{country_of_origin.name}"
+
         meta = [*self.format_meta(data), f_country_of_origin]
-        f_meta = self.join_data(meta)
-        if f_meta is not None:
-            embed.add_field(name='Meta', value=f_meta)
-        
-        # Community 
+        if f_meta := self.join_data(meta):
+            embed.add_field(name="\u200b", value=f_meta)
+
+        # Community
         community = self.format_community(data)
-        f_community = self.join_data(community)
-        if f_community is not None:
-            embed.add_field(name='Community', value=f_community)
+        if f_community := self.join_data(community):
+            embed.add_field(name="\u200b", value=f_community)
         
+        # Some more infos about the author
+        ctx = menu.ctx
+        dm_channel_url = DM_CHANNEL_URL_TEMPLATE.format(ctx.author.id)
+        embed.set_author(name=f"Requested by : {ctx.author}", 
+                         icon_url=ctx.author.avatar_url, 
+                         url=dm_channel_url)
+
         return embed.sort_fields()
 
 
@@ -186,6 +259,18 @@ class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
         self.url = "https://graphql.anilist.co"
+
+    @staticmethod
+    def transform_to_search_param(*data: str):
+        media_params = []
+
+        for param in data:
+            arg_pointer, _ = param.split(':')
+
+            arg_name = arg_pointer[1:]
+            media_params.append(f"{arg_name}: {arg_pointer}")
+
+        return ', '.join(data), ', '.join(media_params)
 
     @staticmethod
     def get_response_errors(data: dict) -> Generator[str, None, None]:
@@ -204,62 +289,24 @@ class Anilist(commands.Cog):
 
             return resp
 
-    @commands.command(aliases=['anime', 'manga'])
-    async def media(self, ctx: core.Context, *, query: str):
+    @commands.command()
+    async def search(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
-        json_query = """
-        query ($page: Int, $perPage: Int, $search: String, $asHtml: Boolean) {
-            Page (page: $page, perPage: $perPage) {
-                media (search: $search) {
-                    bannerImage
-                    coverImage {
-                        extraLarge
-                        color
-                    }
-                    title {
-                        english
-                        romaji
-                    }
-                    format
-                    description(asHtml: $asHtml)
-
-                    startDate {
-                        day
-                        month
-                        year
-                    }
-                    endDate {
-                        day
-                        month
-                        year
-                    }
-                    nextAiringEpisode {
-                        airingAt
-                        timeUntilAiring
-                    }
-                    season
-                    countryOfOrigin
-                    status
-                    
-                    episodes 
-                    duration
-                    chapters
-                    volumes
-                    source
-
-                    averageScore
-                    popularity
-                    favourites
-                }
-            }
-        }
-        """ 
+        params = ["$search: String"]
         variables = {
             'search': query,
-            'pag': 1,
-            'perPage': 3,
+            'page': 1,
+            'perPage': 10,
             'asHtml': False
         }
+
+        if not ctx.is_nsfw:
+            params.append("$isAdult: Boolean") 
+            variables['isAdult'] = False
+
+        params = self.transform_to_search_param(*params)
+
+        json_query = QUERY_TEMPLATE % params
 
         resp = await self.make_request(json_query, variables)
 

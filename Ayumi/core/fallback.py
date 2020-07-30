@@ -17,19 +17,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import asyncio
+import logging
+
+WARN_TEMPLATE = ("Attempted to access %s with:\n-args:%s\n-kwargs:%s\n")
+INIT_TEMPLATE = "Created a fallback for %s"
 
 class Fallback:
     """
     A class designed to handle (some) operations without raising any errors
     """
-    __slots__ = ()
-    
+    def __init__(self, name: str, logger: logging.Logger):
+        self.name = name
+        self.logger = logger
+        self.logger.warning(INIT_TEMPLATE, name)
+
     def __call__(self, *args, **kwargs):
+        self.logger.warning(WARN_TEMPLATE, self.name, str(args), str(kwargs))
         return self
     
     __getattr__ = __getitem__ = __setitem__ = __call__
 
     def __await__(self, *args, **kwargs):
+        self(*args, **kwargs)
         return asyncio.sleep(0, self).__await__()
 
     def __bool__(self):

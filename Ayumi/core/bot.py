@@ -20,13 +20,14 @@ import pathlib
 import logging
 import traceback
 import inspect
-from typing import Union
+from typing import Union, Tuple, Callable
 
 import discord
 from discord.ext import commands, tasks
 
 import aiohttp
 import aioredis
+import asyncpg
 
 import core
 import config
@@ -48,6 +49,7 @@ class Bot(commands.Bot):
         self._webhook = None
         self._logger = None
         self._redis = None
+        self._pool = None
 
     async def connect(self, *args, **kwargs):
         """Used as an async alternative init"""
@@ -60,17 +62,26 @@ class Bot(commands.Bot):
         logger.setLevel(LOGGING_LEVEL)
         handler = core.WebhookHandler(self, level=LOGGING_LEVEL)
         logger.addHandler(handler)
-        
+
+        logger.info('Started connecting to storage')
+
         try:
-            self._redis = await aioredis.create_redis_pool(config.REDIS_URL, 
-                                                           password=config.REDIS_PASSWORD
-                                                           )
+            self._redis = await aioredis.create_redis_pool(config.REDIS_URL,
+                                                           password=config.REDIS_PASSWORD)
         except Exception as e:
-            self._redis = fallback.Fallback()
+            self._redis = fallback.Fallback('redis', logger)
             self.dispatch("error", exception=e)
         else:
             logger.info('Connected to redis')
 
+        try:
+            self._pool = await asyncpg.create_pool(config.PSQL_URL,
+                                                   password=config.PSQL_PASSWORD)
+        except Exception as e:
+            self.dispatch("error", exception=e)
+            self._pool = fallback.Fallback('psql', logger)
+        else:
+            logger.info('Connected to psql')
 
         for file in pathlib.Path('./extensions').glob('**/*.py'):
 
@@ -95,6 +106,10 @@ class Bot(commands.Bot):
     @property
     def redis(self) -> aioredis.Redis:
         return self._redis
+    
+    @property
+    def pool(self) -> asyncpg.Connection:
+        return self._pool
 
     @property
     def session(self) -> aiohttp.ClientSession:
@@ -103,6 +118,10 @@ class Bot(commands.Bot):
     @property
     def webhook(self) -> discord.Webhook:
         return self._webhook
+    
+    # Custom context
+    async def get_context(self, msg: discord.Message, cls=context.Context) -> context.Context:
+        return await super().get_context(msg, cls=cls)
 
     # Error handling
 
@@ -115,27 +134,38 @@ class Bot(commands.Bot):
             clean_tb = utils.clean_tb(tb)
 
         self.logger.error(EVENT_ERROR_TEMPLATE, event, clean_tb)
-    
+
     async def on_command_error(self, ctx: context.Context, error: Exception):
         """Logs errors for command, then send them into the user"""
         error = getattr(error, "original", error)
-       
+
         clean_tb = utils.clean_tb_from_exc(error)
         self.logger.warn(
-            COMMAND_ERROR_TEMPLATE, 
+            COMMAND_ERROR_TEMPLATE,
             str(ctx.command),
             ctx.message.content,
             clean_tb
         )
-        
+
         await ctx.send(f"{error.__class__.__name__}: {error}")
 
     async def close(self):
         """Close all of our external connections"""
-        self.redis.close()
-        self.logger.info('Closed redis')
+        try:
+            self.redis.close()
+            self.logger.info('Closed redis')
+        except Exception:
+            traceback.print_exc()
+        try:
+            await self.pool.close()
+        except Exception:
+            traceback.print_exc()
 
         await super().close()
-        
+
         self.logger.info('Finished closing the whole bot')
+        try:
+            await self.session.close()
+        except Exception:
+            traceback.print_exc()
 
