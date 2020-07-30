@@ -146,8 +146,13 @@ class Bot(commands.Bot):
             ctx.message.content,
             clean_tb
         )
+        
+        embed = utils.Embed(title=f"An error has occured : {error.__class__.__name__}",
+                            description=utils.to_codeblocks(error, lang='py'))
 
-        await ctx.send(f"{error.__class__.__name__}: {error}")
+        embed.add_field(name="Support server", value=f"[Support server]({utils.SUPPORT_SERVER})")
+
+        await ctx.send(embed=embed)
 
     async def close(self):
         """Close all of our external connections"""

@@ -26,6 +26,13 @@ import pycountry
 import core
 import utils
 
+# This whole code is fucked up
+# TODO: -Formatter should return a tuple name, value that will be formatted later on
+#       -Keep everything inside their own functions instead of mixing them up together
+#       - v what the fuck is this doing here
+
+DM_CHANNEL_URL_TEMPLATE = "https://discordapp.com/channels/@me/{}/"
+
 # This should be formatted with %s to avoid fstring or .format issues
 QUERY_TEMPLATE = """
 query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
@@ -77,28 +84,101 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
 }
 """
 
-DM_CHANNEL_URL_TEMPLATE = "https://discordapp.com/channels/@me/{}/"
-
-
 class PresetMenuPages(menus.MenuPages):
+
+    QUERY = """
+INSERT INTO anime_reminders (user_id, trigger_time, anime_name, message_url)
+VALUES ($1, $2, $3, $4)
+"""
+
     def __init__(self, source: menus.ListPageSource, **options):
-        super().__init__(source, delete_message_after=True, timeout=60)
+        super().__init__(source, clear_reactions_after=True, timeout=60)
         self.pages_added_to_calendar = set()
+
+    async def add_to_remind_list(self):
+        """A helper function that adds an anime to the user's reminder list"""
+        ctx = self.ctx
+        data = await self.source.get_page(self.current_page)
+        next_airing_data = data['nextAiringEpisode']
+
+        if not next_airing_data:
+            return await ctx.send("Sorry ! I don't have any precise delay until the next release",
+                                  delete_after=5)
+        
+        media_title = self.source.format_title(data)
+        reminder_timestamp = next_airing_data['airingAt'] - 300  # 5m before it
+        reminder_dt = dt.datetime.fromtimestamp(reminder_timestamp)
+        natural_delta = humanize.naturaltime(reminder_dt) 
+        info = f"Add a reminder 5 minutes before the airing of `{media_title}` ? ({natural_delta})"
+
+        menu = utils.Confirm(self.ctx, {'content': info}, delete_message_after=True)
+        
+        async with menu as confirmed:
+            if not confirmed:
+                return self.stop()
+        
+        aware_reminder_dt = reminder_dt.replace(tzinfo=dt.timezone.utc)
+
+        async with ctx.bot.pool.acquire() as con:
+            await con.execute(self.QUERY, ctx.author.id, reminder_dt, media_title, self.message.jump_url)
+
+        await ctx.send(f"Successfully added a reminder for `{media_title}`")
+        
+        self.pages_added_to_calendar.add(self.current_page)
+
+    async def remove_from_remind_list(self):
+        pass
 
     @menus.button("\U0001f5d3", position=menus.Last(2))  # calendar
     async def on_calendar(self, payload: discord.RawReactionActionEvent):
-        pass
+        if self.current_page in self.pages_added_to_calendar:
+            return await self.remove_from_remind_list()
+        else:
+            return await self.add_to_remind_list()
+    
+    # Overriden buttons
+    
+    def _skip_single_triangle_buttons(self):
+        max_pages = self.source.get_max_pages()
+        return max_pages <= 1
+
+
+    @menus.button('\N{BLACK LEFT-POINTING TRIANGLE}\ufe0f', position=menus.First(1),
+                  skip_if=_skip_single_triangle_buttons)
+    async def go_to_previous_page(self, payload: discord.RawReactionActionEvent):
+        """Overriden to implement skip_if"""
+        return await super().go_to_previous_page(payload)
+
+
+    @menus.button('\N{BLACK RIGHT-POINTING TRIANGLE}\ufe0f', position=menus.Last(0),
+                  skip_if=_skip_single_triangle_buttons)
+    async def go_to_next_page(self, payload: discord.RawReactionActionEvent):
+        """Same as go_to_previous_page"""
+        return await super().go_to_next_page(payload)
 
 
 class PresetSource(menus.ListPageSource):
     def __init__(self, entries: list):
         super().__init__(entries, per_page=1)
 
+
 class MediaSource(PresetSource):
+    """Source that handles the formatting for the responses from the api"""
+    def is_paginating(self) -> True:
+        """we want to force buttons there"""
+        return True
+
     @staticmethod
     def join_data(data: list) -> Optional[str]:
         """Jons the data or returns none if there isn't any"""
         return '\n\n'.join(data) or None
+    
+    @staticmethod
+    def format_title(data: dict) -> str:
+        """Formats the title (used for the menu source"""
+        main_title = data['title']['english'] or data['title']['romaji']
+        f_is_adult = "18+ " if data['isAdult'] else ''
+        return f"[{f_is_adult}{data['format']}] {main_title}"
 
     # Airing info
 
@@ -140,8 +220,6 @@ class MediaSource(PresetSource):
 
         airing_at, time_until_airing = getter(next_airing_episode)
         airing_at = dt.datetime.fromtimestamp(airing_at)
-
-        delta = dt.datetime.now() + dt.timedelta(seconds=time_until_airing)
         f_airing_time = airing_at.strftime("**Next airing**\n%d %B %Y %H:%M UTC")
 
         return airing_at, f_airing_time
@@ -161,7 +239,7 @@ class MediaSource(PresetSource):
                     info = humanize.naturaldelta(delta)
 
                 elif isinstance(info, str):
-                    info = info.lower().replace('_', ' ').title() 
+                    info = info.lower().replace('_', ' ').title()
 
                 line = f"**{name}**\n{info}"
 
@@ -188,12 +266,7 @@ class MediaSource(PresetSource):
 
     def format_page(self, menu: PresetMenuPages, data: dict) -> utils.Embed:
         embed = utils.Embed()
-
-        main_title = data['title']['english'] or data['title']['romaji']
-
-        f_is_adult = "18+ " if data['isAdult'] else ''
-        embed.title = f"[{f_is_adult}{data['format']}] {main_title}"
-
+        embed.title = self.format_title(data)
         embed.description = utils.remove_html_tags(data['description'] or '')
 
         if color_hex := data['coverImage']['color']:
@@ -210,13 +283,13 @@ class MediaSource(PresetSource):
         boundary_dates = operator.itemgetter('startDate', 'endDate')(data)
         f_boundary_dates = self.format_boundary_dates(boundary_dates)
         airing_at, f_airing_time = self.format_airing_dates(data)
-        
+
         # special thing for the footer
         max_pages = self.get_max_pages()
         footer = f"Page {menu.current_page + 1} out of {max_pages}"
         if airing_at:
             embed.timestamp = airing_at
-            footer += " | Live counter until next release :"
+            footer += " | Next release in your timezone :"
 
         embed.set_footer(text=footer)
 
@@ -244,12 +317,12 @@ class MediaSource(PresetSource):
         community = self.format_community(data)
         if f_community := self.join_data(community):
             embed.add_field(name="\u200b", value=f_community)
-        
+
         # Some more infos about the author
         ctx = menu.ctx
         dm_channel_url = DM_CHANNEL_URL_TEMPLATE.format(ctx.author.id)
-        embed.set_author(name=f"Requested by : {ctx.author}", 
-                         icon_url=ctx.author.avatar_url, 
+        embed.set_author(name=f"Requested by : {ctx.author}",
+                         icon_url=ctx.author.avatar_url,
                          url=dm_channel_url)
 
         return embed.sort_fields()
@@ -301,7 +374,7 @@ class Anilist(commands.Cog):
         }
 
         if not ctx.is_nsfw:
-            params.append("$isAdult: Boolean") 
+            params.append("$isAdult: Boolean")
             variables['isAdult'] = False
 
         params = self.transform_to_search_param(*params)

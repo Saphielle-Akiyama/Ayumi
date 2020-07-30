@@ -19,9 +19,11 @@ HTML_TAG_REGEX = re.compile(r"<.+>")
 
 INDENT = '\u200b '
 
+
 def to_codeblocks(arg: str, lang: str = '') -> str:
     """Turns a string into a codeblock one"""
     return f"```{lang}\n{arg}```"
+
 
 def line_no_dedent(line: str) -> str:
     """Prevents discord from dedenting a line"""
@@ -37,30 +39,36 @@ def line_no_dedent(line: str) -> str:
 
     return line
 
+
 def text_no_dedent(arg: str):
     """Prevents discord from dedenting a text"""
     splitted = arg.split('\n')
     mapped = map(line_no_dedent, splitted)
     return '\n'.join(mapped)
 
+
 def indent(line: str, *, count: int = 4) -> str:
     """Indents a line in a way that discord doesn't dedent it"""
-    return f"{INDENT * count}{line}" 
+    return f"{INDENT * count}{line}"
+
 
 def to_url_markdown(match: re.Match) -> str:
     """A helper function that replaces urls with their markdown version"""
     domain_name = match.group('domain_name')
-    full_match = match.group('full_match') 
+    full_match = match.group('full_match')
 
     return f"[{domain_name}]({full_match})"
+
 
 def shorten_urls(arg: str):
     """Transforms urls into markdown to avoid showing the full link"""
     return re.sub(URL_REGEX, to_url_markdown, arg)
 
+
 def remove_html_tags(arg: str) -> str:
     """Removes all html tags for a string, option seems weird"""
     return re.sub(HTML_TAG_REGEX, '', arg)
+
 
 def split_by_caps(char: str) -> str:
     """Helper function that returns a whitespace + the lowercase letter
@@ -70,8 +78,8 @@ def split_by_caps(char: str) -> str:
     lower = char.lower()
     return f" {lower}"
 
+
 def camelcase_to_natural(arg: str) -> str:
     """camelCase -> camel case"""
     mapped = map(split_by_caps, arg)
     return ''.join(mapped)
-

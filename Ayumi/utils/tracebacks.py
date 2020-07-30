@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import re
-import textwrap
 import traceback
 from typing import Tuple
 from types import TracebackType
@@ -56,4 +55,3 @@ def clean_tb_from_exc(exc: Exception) -> str:
     """Returns a cleaned traceback from only an exception"""
     tb = tb_from_exc(exc)
     return clean_tb(tb)
-
