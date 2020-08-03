@@ -438,7 +438,7 @@ WHERE user_id = $1
         async with self.bot.pool.acquire() as con:
             reminders = await con.fetch("SELECT * FROM anime_reminders")
 
-        for reminder in reminders:
+        for record in reminders:
             coro = self.reminder_dispatcher(record)
             self.bot.loop.create_task(coro)
 
