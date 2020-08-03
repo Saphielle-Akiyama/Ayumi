@@ -435,7 +435,9 @@ WHERE user_id = $1
 
     async def setup_reminders(self):
         """Fetches all reminders, then dispatches them"""  # might optimize this with a tasks loop
-        reminders = await con.fetch("SELECT * FROM anime_reminders")
+        async with self.bot.pool.acquire() as con:
+            reminders = await con.fetch("SELECT * FROM anime_reminders")
+
         for reminder in reminders:
             coro = self.reminder_dispatcher(record)
             self.bot.loop.create_task(coro)
