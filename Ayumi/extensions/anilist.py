@@ -426,7 +426,7 @@ WHERE user_id = $1
                 pass
 
         async with self.bot.pool.acquire() as con:
-            await con.execute(DELETE_QUERY, *getter(record))
+            await con.execute(self.DELETE_QUERY, *getter(record))
 
     async def reminder_dispatcher(self, record: asyncpg.Record):
         """Waits until the reminder time, then dispatch an anime_reminder event"""
