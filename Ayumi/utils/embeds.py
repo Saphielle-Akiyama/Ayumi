@@ -24,11 +24,20 @@ import discord
 from discord.ext import commands
 from jishaku import codeblocks
 
-from typing import Optional, Tuple, Callable
+from typing import Optional, Tuple, Callable, Union
 
 
 MARKDOWN_URL_REGEX = re.compile(r"\[(?P<visible_name>.+)\]\(.+\)")
 
+ITERABLES = (list, tuple)
+
+def flatten_nested(iterable: Union[ITERABLES]):
+    """A helper function that flatten nested iterables"""
+    for item in iterable:
+        if isinstance(item, ITERABLES):
+            yield from flatten_nested(item)
+        else:
+            yield item
 
 class Embed(discord.Embed):
     def __init__(self, **options):
@@ -78,13 +87,37 @@ class Embed(discord.Embed):
 
     def sort_fields(self, key: Optional[Callable] = None):
         """
-        Sorts the embed's fields according to a key, the callable
+        Sorts the embed's fields according to a key accounting 
+        for inlines the callable
         must take a dict containing, the field's name, value and inline state
         returns self for fluid chaining
         """
+        if len(self._fields) < 2:
+            return self
+
         key = key or self.default_field_sort_key
-        sorted_fields = sorted(self._fields, key=key)
-        self._fields = [*sorted_fields]
+        
+        grouped_fields = []
+        temp = [] 
+
+        last_inline_state = self._fields[0]['inline']
+        for field in self._fields:
+            if field['inline'] == last_inline_state:
+                temp.append(field)
+            else:
+                grouped_fields.append(temp)
+                temp = [field]
+                last_inline_state = not last_inline_state
+        if temp:
+            grouped_fields.append(temp)
+        
+        sorted_groups = [[*sorted(field_group, key=key)] for field_group in grouped_fields]
+        self._fields = [*flatten_nested(sorted_groups)]
+            
+
+
+
+
         return self
 
 

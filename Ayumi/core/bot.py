@@ -78,7 +78,7 @@ class Bot(commands.Bot):
             self._pool = await asyncpg.create_pool(config.PSQL_URL,
                                                    password=config.PSQL_PASSWORD)
         except Exception as e:
-            self.dispatch("error", exception=e)
+            self.dispatch("error", exception=e, level='critical')
             self._pool = fallback.Fallback('psql', logger)
         else:
             logger.info('Connected to psql')
@@ -132,8 +132,10 @@ class Bot(commands.Bot):
         else:
             tb = traceback.format_exc()
             clean_tb = utils.clean_tb(tb)
-
-        self.logger.error(EVENT_ERROR_TEMPLATE, event, clean_tb)
+        
+        log_method = self.logger.warning
+        log_method = kwargs.get('level', log_method)
+        log_method(EVENT_ERROR_TEMPLATE, event, clean_tb)
 
     async def on_command_error(self, ctx: context.Context, error: Exception):
         """Logs errors for command, then send them into the user"""
@@ -146,11 +148,13 @@ class Bot(commands.Bot):
             ctx.message.content,
             clean_tb
         )
-        
+        if isinstance(error, commands.CommandNotFound):
+            return
+
         embed = utils.Embed(title=f"An error has occured : {error.__class__.__name__}",
                             description=utils.to_codeblocks(error, lang='py'))
 
-        embed.add_field(name="Support server", value=f"[Support server]({utils.SUPPORT_SERVER})")
+        embed.add_field(name="Support server", value=f"[Support server]({config.SUPPORT_SERVER})")
 
         await ctx.send(embed=embed)
 
