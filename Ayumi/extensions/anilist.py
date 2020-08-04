@@ -27,12 +27,9 @@ import pycountry
 import core
 import utils
 
-# This whole code is fucked up
 # TODO: -Formatter should return a tuple name, value that will be formatted later on
 #       -Keep everything inside their own functions instead of mixing them up together
 #       -Redis in make_request
-#       -In the add/remove reminders menu, there are some common data to format
-#       -Query data before showing menus
 
 DM_CHANNEL_URL_TEMPLATE = "https://discordapp.com/channels/@me/{}/"
 
@@ -120,25 +117,30 @@ class PresetMenuPages(menus.MenuPages):
     async def add_to_remind_list(self, data: dict):
         """A helper function that adds an anime to the user's reminder list"""
         ctx = self.ctx
+        bot = ctx.bot
+
         if not (next_airing_data := data['nextAiringEpisode']):
             return await ctx.send("Sorry ! I don't have any precise delay until the next release",
                                   delete_after=5)
         
         media_title, aware_reminder_dt, human_delta = self.format_common_data(data)
         info = f"Add a reminder 5 minutes before the airing of `{media_title}` ({human_delta}) ?"
-        menu = utils.Confirm(self.ctx, {'content': info}, delete_message_after=True)
+        menu = utils.Confirm(ctx, {'content': info}, delete_message_after=True)
         if not await self.get_user_confirmation(menu):
             msg = "Cancelled addition of `{media_title}` in your reminders list"
             return await self.ctx.send(msg)
         
         query = """
 INSERT INTO anime_reminders (user_id, trigger_time, anime_name, channel_id)
-VALUES ($1, $2, $3, $4); 
+VALUES ($1, $2, $3, $4)
+RETURNING *; 
 """
         query_args = (ctx.author.id, aware_reminder_dt, media_title, ctx.channel.id)
-        async with ctx.bot.pool.acquire() as con:
-            await con.execute(query, *query_args)
+        async with bot.pool.acquire() as con:
+            record = await con.fetchrow(query, *query_args)
         
+        bot.loop.create_task(ctx.cog.reminder_dispatcher(record))
+
         data['isInReminderList'] = True
         await ctx.send(f"Added a reminder for `{media_title}`", delete_after=5)
         
@@ -311,8 +313,7 @@ WHERE user_id = $1
     async def check_if_userlist(self, ctx: core.Context, media_title: str) -> bool:
         """Checks if an anime is in an user's list"""
         async with ctx.bot.pool.acquire() as con:
-            res = await con.fetchrow(self.CHECK_USER_LIST_QUERY, ctx.author.id, media_title)
-        return res
+            return await con.fetchrow(self.CHECK_USER_LIST_QUERY, ctx.author.id, media_title)
 
     async def format_page(self, menu: PresetMenuPages, data: dict) -> utils.Embed:
         embed = utils.Embed()
