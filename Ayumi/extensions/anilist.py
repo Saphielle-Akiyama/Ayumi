@@ -417,7 +417,7 @@ WHERE user_id = $1
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         content = f"<@{user_id}> Here's your reminder for `{anime_name}`"
         try:
-            await channel.send(content, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False))
+            await channel.send(content)
         except discord.HTTPException:
             user_id = record['user_id']
             user = bot.get_user(user_id) or await bot.fetch_user(user_id)
