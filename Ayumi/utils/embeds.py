@@ -16,6 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import textwrap
 import random
 import math
 import re
@@ -133,7 +134,7 @@ class LongEmbed(Embed):
         
         self.prefix = prefix = options.get('prefix', "```")
         self.suffix = suffix = options.get('suffix', "```")
-
+        description = self.description
         paginator = commands.Paginator(
             max_size=2048, 
             prefix=prefix,
@@ -141,13 +142,18 @@ class LongEmbed(Embed):
         )
        
         # Filling the description first
-
+        
         if not self.description:
             return
         
-        for line in self.description.split('\n'):
-            paginator.add_line(line)
-        
+        try:
+            for line in description.split('\n'):
+                paginator.add_line(line)
+        except RuntimeError:
+            paginator.clear()
+            for line in textwrap.wrap(description, width=95):
+                paginator.add_line(line)
+
         self.description, *rest = paginator.pages
 
         if not rest:
