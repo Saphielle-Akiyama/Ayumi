@@ -91,56 +91,54 @@ class MediaPages(menus.MenuPages):
     def __init__(self, entries: list, *, extra_sources: Tuple[type],  **options):
         self.initial_source = MediaSourceFront(entries)
         super().__init__(self.initial_source, delete_message_after=True, timeout=60)
-
         self.extra_sources = {}
+
         for index, ExtraSource in enumerate(extra_sources, 2):
             source = ExtraSource(entries)
-            self.extra_sources[source.emoji] = self.get_cycle(source)
+            self.extra_sources[source.emoji] = source
 
             button = menus.Button(
                 source.emoji,
                 self._extra_source_button_template,
                 position=menus.Last(index),
             )
+
             self.add_button(button)
-
-        self.last_cycled = None
-
-    def get_cycle(self, new_source: menus.ListPageSource) -> itertools.cycle:
-        """Helper function to create rotating sources between the main one and the custom one"""
-        return itertools.cycle((new_source, self.initial_source))
 
     async def _extra_source_button_template(self, payload: discord.RawReactionActionEvent):
         """A template that is used as the callback for all extra buttons"""
-        sources = self.extra_sources[str(payload.emoji)]
-        new_source = next(sources)
+        emoji = str(payload.emoji)
+        if self.source is self.initial_source:
+            source = self.extra_sources[emoji]
+        elif self.source is not (new_source := self.extra_sources[emoji]):
+            source = new_source
+        else:
+            source = self.initial_source
 
-        print("New source", new_source, sep=' -> ')
-
-        await self.change_source(new_source, at_index=self.current_page)
-        self.last_cycled = sources
+        await self.change_source(source)
 
     async def change_source(self, source: menus.ListPageSource, *,
-                            at_index: int = 0, show_page: bool = True):
-        """Subclassed to allow being able to display a different index"""
+                            at_index: Optional[int] = None, show_page: bool = True):
+        """
+        Subclassed to allow being able to display a different index
+        and to decide whether to immediatly update or not
+        """
         if not isinstance(source, menus.ListPageSource):
             raise TypeError('Expected {0!r} not {1.__class__!r}.'.format(PageSource, source))
-
+        
+        at_index = at_index or self.current_page
         self._source = source
-        self.current_page = at_index
+        self.current_page = at_index 
 
         if self.message and show_page:
             await source._prepare_once()
             await self.show_page(at_index)
-
-    async def show_page(self, page_number: int):
-        """Overriden to show the front page everytime"""
-        if self.last_cycled:
-           new_source = next(self.last_cycled)
-           await self.change_source(new_source, at_index=self.current_page, show_page=False)
-           self.last_cycled = None
-
-        return await super().show_page(page_number)
+    
+    async def update(self, payload: discord.RawReactionActionEvent):
+        """Returns to the main page everytime a movement button is pressed"""
+        if str(payload.emoji) not in self.extra_sources:
+            await self.change_source(self.initial_source, show_page=False)
+        return await super().update(payload)
 
     def _skip_single_triangle_buttons(self) -> bool:
         """Skips single triangle buttons if we have only 1 page or less"""
