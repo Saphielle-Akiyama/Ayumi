@@ -45,8 +45,14 @@ class Embed(discord.Embed):
         super().__init__(**options)
         self.default_inline = options.get('default_inline', True)
 
-        if isinstance(self.colour, discord.Embed.Empty.__class__):
+        if self.colour is discord.Embed.Empty:
             self.colour = discord.Colour.from_hsv(random.random(), random.uniform(0.75, 0.95), 1)
+    
+    def __call__(self, **kwargs):
+        """Changing multiple parameters at once, I guess"""
+        for name, value in kwargs.items():
+            setattr(self, name, value)
+        return self
 
     def add_field(self, *, name: str, value: str, inline: Optional[bool] = None):
         """Uses a default inline, I guess"""

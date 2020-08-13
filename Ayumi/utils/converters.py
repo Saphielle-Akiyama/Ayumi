@@ -29,7 +29,6 @@ class Literal:
     """
     A converter that tries to match a literal set of values
     """
-
     @staticmethod
     def get_ratio(left: str, right: str) -> Tuple[str, float]:
         """Avoids having to stick everything in a single line"""

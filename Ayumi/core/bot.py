@@ -70,7 +70,7 @@ class Bot(commands.Bot):
                                                            password=config.REDIS_PASSWORD)
         except Exception as e:
             self._redis = fallback.Fallback('redis', logger)
-            self.dispatch("error", exception=e)
+            self.dispatch("error", "Redis connection", exception=e)
         else:
             logger.info('Connected to redis')
 
@@ -78,7 +78,7 @@ class Bot(commands.Bot):
             self._pool = await asyncpg.create_pool(config.PSQL_URL,
                                                    password=config.PSQL_PASSWORD)
         except Exception as e:
-            self.dispatch("error", exception=e, level='critical')
+            self.dispatch("error", "PSQL connection", exception=e, level='critical')
             self._pool = fallback.Fallback('psql', logger)
         else:
             logger.info('Connected to psql')

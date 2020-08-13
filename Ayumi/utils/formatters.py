@@ -13,6 +13,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import re
+from typing import Tuple
 
 URL_REGEX = re.compile(r"(?P<full_match>\"https?://(?P<domain_name>.+)/.+\")")
 HTML_TAG_REGEX = re.compile(r"<.+>")
@@ -83,3 +84,18 @@ def camelcase_to_natural(arg: str) -> str:
     """camelCase -> camel case"""
     mapped = map(split_by_caps, arg)
     return ''.join(mapped)
+
+
+def to_graphql_search_param(*data: str):
+    """Makes it easier to format graphql search data"""
+    media_params = []
+
+    for param in data:
+        arg_pointer, _ = param.split(':')
+
+        arg_name = arg_pointer[1:]
+        media_params.append(f"{arg_name}: {arg_pointer}")
+
+    return ', '.join(data), ', '.join(media_params)
+
+

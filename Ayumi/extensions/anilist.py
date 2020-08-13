@@ -22,12 +22,11 @@ import asyncpg
 import discord
 from discord.ext import commands, menus
 import humanize
-import pycountry
 
 import core
 import utils
 
-# TODO: -Formatter should return a tuple name, value that will be formatted later on
+# TODO: -Formatter should return a tuple (name, value) that will be formatted later on
 #       -Keep everything inside their own functions instead of mixing them up together
 #       -Redis in make_request
 
@@ -96,7 +95,7 @@ class NoResultsError(commands.CommandError):
 
 class PresetMenuPages(menus.MenuPages):
     def __init__(self, source: menus.ListPageSource, **options):
-        super().__init__(source, clear_reactions_after=True, timeout=60)
+        super().__init__(source, delete_message_after=True, timeout=60)
         self.pages_added_to_calendar = set()
     
     def format_common_data(self, data: dict) -> Tuple[str, dt.datetime, str]:
@@ -119,7 +118,7 @@ class PresetMenuPages(menus.MenuPages):
         ctx = self.ctx
         bot = ctx.bot
 
-        if not (next_airing_data := data['nextAiringEpisode']):
+        if not data['nextAiringEpisode']:
             return await ctx.send("Sorry ! I don't have any precise delay until the next release",
                                   delete_after=5)
         
@@ -167,7 +166,7 @@ WHERE user_id = $1
     
     # Buttons 
 
-    @menus.button("\U0001f5d3", position=menus.Last(2))  # calendar
+    @menus.button(ALARM_CLOCK_EMOJI, position=menus.Last(2))
     async def on_calendar(self, payload: discord.RawReactionActionEvent):
         """Adds it to the user's remind list"""
         data = await self.source.get_page(self.current_page)
@@ -270,46 +269,7 @@ WHERE user_id = $1
 
         return airing_at, f_airing_time
 
-    @staticmethod
-    def format_meta(data: dict) -> Generator[str, None, None]:
-        """Formats metrics"""
-        to_get = ('episodes', 'duration', 'chapters', 'volumes', 'source')
-        infos = operator.itemgetter(*to_get)(data)
-
-        for name, info in zip(to_get, infos):
-            if info:
-                name = name.lower().title()
-
-                if name == 'Duration':
-                    delta = dt.timedelta(minutes=info)
-                    info = humanize.naturaldelta(delta)
-
-                elif isinstance(info, str):
-                    info = info.lower().replace('_', ' ').title()
-
-                line = f"**{name}**\n{info}"
-
-                yield line
-
-    @staticmethod
-    def format_community(data: dict):
-        """Formats community ratings"""
-        to_get = ('averageScore', 'popularity', 'favourites', 'trending')
-
-        avg_score, popularity, favourites, related_actions = operator.itemgetter(*to_get)(data)
-
-        if avg_score:
-            yield f"**Score**\n{avg_score}/100"
-
-        if popularity:
-            yield f"**Watchlists**\n{popularity}"
-
-        if favourites:
-            yield f"**Favourites**\n{favourites}"
-
-        if related_actions:
-            yield f"**Related actions\nin the past hour**\n{related_actions}"
-    
+       
     async def check_if_userlist(self, ctx: core.Context, media_title: str) -> bool:
         """Checks if an anime is in an user's list"""
         async with ctx.bot.pool.acquire() as con:
@@ -334,6 +294,10 @@ WHERE user_id = $1
         boundary_dates = operator.itemgetter('startDate', 'endDate')(data)
         f_boundary_dates = self.format_boundary_dates(boundary_dates)
         airing_at, f_airing_time = self.format_airing_dates(data)
+        
+
+        embed.add_field(name="Dates", value=" | ".join([*f_boundary_dates, f_airing_time]),
+                        inline=False)
 
         # special thing for the footer
         max_pages = self.get_max_pages()
@@ -343,46 +307,21 @@ WHERE user_id = $1
             footer += " | Next release in your timezone :"
 
         embed.set_footer(text=footer)
-
-        if f_season := data['season']:
-            cap_season = f_season.lower().title()
-            f_season = f"**Season**\n{cap_season}"
-
-        status = data['status'].lower().replace('_', ' ').title()
-        f_status = f"**Status**\n{status}"
-        dates = [*f_boundary_dates, f_airing_time, f_season, f_status]
-        filtered_dates = filter(None, dates)
-        formatted_dates = self.join_data(filtered_dates)
-        if formatted_dates:
-            embed.add_field(name="\u200b", value=formatted_dates)
-
-        # Some meta info
-        country_of_origin = pycountry.countries.get(alpha_2=data['countryOfOrigin'])
-        f_country_of_origin = f"**Country of origin**\n{country_of_origin.name}"
-
-        meta = [*self.format_meta(data), f_country_of_origin]
-        if f_meta := self.join_data(meta):
-            embed.add_field(name="\u200b", value=f_meta)
-
-        # Community
-        community = self.format_community(data)
-        if f_community := self.join_data(community):
-            embed.add_field(name="\u200b", value=f_community)
-        
-        # Checking if the anime is in the user's list
+       
         ctx = menu.ctx
-
+        
         user_data = []
-
         if data.get('isInReminderList', False) or await self.check_if_userlist(ctx, embed.title):
             user_data.append(f"You can use {ALARM_CLOCK_EMOJI} to remove your current reminder")
             data['isInReminderList'] = True 
         else:
             data['isInReminderList'] = False
-            msg = f"You can use {ALARM_CLOCK_EMOJI} to get a message 5 minutes before the next release !"
+            msg = (f"You can use {ALARM_CLOCK_EMOJI} to get a message 5 minutes "
+                   "before the next release !")
             user_data.append(msg)
         
-        embed.add_field(name='\u200b', value=self.join_data(user_data), inline=False)
+        if data['nextAiringEpisode']:
+            embed.add_field(name='\u200b', value=self.join_data(user_data), inline=False)
 
         # Some more infos about the author
         dm_channel_url = DM_CHANNEL_URL_TEMPLATE.format(ctx.author.id)
@@ -392,42 +331,38 @@ WHERE user_id = $1
 
         return embed.sort_fields()
 
-
-class Anilist(commands.Cog):
+class Anilist_(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
         self.url = "https://graphql.anilist.co"
         bot.loop.create_task(self.setup_reminders())
-
     
-    DELETE_QUERY = """
-DELETE FROM anime_reminders 
-WHERE user_id = $1
-      AND trigger_time = $2
-      AND anime_name = $3
-      AND channel_id = $4
-"""
-
     @commands.Cog.listener()
     async def on_anime_reminder(self, record: asyncpg.Record):
         """Sends the reminder to the user, then deletes the record"""
         getter = operator.itemgetter('user_id', 'trigger_time', 'anime_name', 'channel_id')
-        user_id, _, anime_name, channel_id = getter(record)
+        user_id, trigger_time, anime_name, channel_id = getter(record)
 
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         content = f"<@{user_id}> Here's your reminder for `{anime_name}`"
         try:
             await channel.send(content)
         except discord.HTTPException:
-            user_id = record['user_id']
             user = bot.get_user(user_id) or await bot.fetch_user(user_id)
             try:
                 await user.send(content)
             except discord.HTTPException:
                 pass
-
+        
+        query = """
+DELETE FROM anime_reminders 
+WHERE user_id = $1
+      AND trigger_time = $2
+      AND anime_name = $3
+      AND channel_id = $4
+"""
         async with self.bot.pool.acquire() as con:
-            await con.execute(self.DELETE_QUERY, *getter(record))
+            await con.execute(query, *getter(record))
 
     async def reminder_dispatcher(self, record: asyncpg.Record):
         """Waits until the reminder time, then dispatch an anime_reminder event"""
@@ -473,7 +408,7 @@ WHERE user_id = $1
         return resp['data']['Page']['media']
 
     @commands.command()
-    async def search(self, ctx: core.Context, *, query: str):
+    async def search_(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
         params = ["$search: String"]
         variables = {
@@ -503,5 +438,6 @@ WHERE user_id = $1
 
 
 def setup(bot: core.Bot):
+    return
     cog = Anilist(bot)
     bot.add_cog(cog)
