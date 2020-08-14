@@ -15,8 +15,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import re
 from typing import Tuple
 
-URL_REGEX = re.compile(r"(?P<full_match>\"https?://(?P<domain_name>.+)/.+\")")
-HTML_TAG_REGEX = re.compile(r"<.+>")
+URL_REGEX = r"https?://(?P<domain_name>.+/?).+"
+HTML_TAG_REGEX = r"<.+>"
 
 INDENT = '\u200b '
 
@@ -56,8 +56,7 @@ def indent(line: str, *, count: int = 4) -> str:
 def to_url_markdown(match: re.Match) -> str:
     """A helper function that replaces urls with their markdown version"""
     domain_name = match.group('domain_name')
-    full_match = match.group('full_match')
-
+    full_match = "full match"
     return f"[{domain_name}]({full_match})"
 
 
@@ -68,7 +67,7 @@ def shorten_urls(arg: str):
 
 def remove_html_tags(arg: str) -> str:
     """Removes all html tags for a string, option seems weird"""
-    return re.sub(HTML_TAG_REGEX, '', arg)
+    return re.sub(HTML_TAG_REGEX, '', arg, flags=re.MULTILINE)
 
 
 def split_by_caps(char: str) -> str:

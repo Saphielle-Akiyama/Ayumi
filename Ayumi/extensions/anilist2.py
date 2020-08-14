@@ -31,6 +31,7 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
             isAdult
             bannerImage
             coverImage {
+                medium
                 extraLarge
                 color
             }
@@ -39,6 +40,7 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
                 romaji
                 native
             }
+            seasonYear
             format
             description(asHtml: $asHtml)
 
@@ -70,6 +72,20 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
             popularity
             favourites
             hashtag
+
+            idMal
+            type
+            siteUrl
+            trailer {
+                site
+                id
+            }
+            streamingEpisodes {
+                title
+                site
+                url
+            }
+
         }
     }
 }
@@ -179,15 +195,20 @@ class TemplateMediaSource(PresetSource):
 
     @staticmethod
     def format_title(data: dict) -> str:
-        """Formats the title (used for the menu source"""
+        """Formats the title used for the menu source"""
         titles = operator.itemgetter("english", "romaji", "native")(data["title"])
         main_title = next(filter(None, titles))
         f_is_adult = "18+ " if data['isAdult'] else ''
-        return f"[{f_is_adult}{data['format']}] {main_title}"
+        f_season_year = f"({season_year})" if (season_year := data["seasonYear"]) else ''
+        return f"[{f_is_adult}{data['format']}] {main_title} {f_season_year}"
 
     async def format_page(self, menu: MediaPages, data: dict) -> utils.Embed:
         """Formats the media into a embed showing the main informations"""
         embed = utils.Embed(title=self.format_title(data))
+        size = "extraLarge" if self.__class__ is TemplateMediaSource else "medium"
+
+        if cover_img := data["coverImage"][size]:
+            embed.set_thumbnail(url=cover_img)
 
         if color_hex := data['coverImage']['color']:
             embed.color = int(color_hex[1:], 16)
@@ -200,7 +221,14 @@ class TemplateMediaSource(PresetSource):
         if next_airing_ep := data["nextAiringEpisode"]:
             embed.timestamp = dt.datetime.fromtimestamp(next_airing_ep["airingAt"])
             footer.append("Next airing in your timezone")
-
+        
+        author = menu.ctx.author
+        embed.set_author(
+            name=f"Requested by {author}", 
+            url=utils.DM_CHANNEL_URL.format(author.id),
+            icon_url=author.avatar_url
+        )
+        
         return embed.set_footer(text=" | ".join(footer))
 
     # Used by subclasses
@@ -341,14 +369,20 @@ class MediaSourceStopwatch(TemplateMediaSource):
 class MediaSourceSpeechBubble(TemplateMediaSource):
     """
     Page displayed when the user clicks on the speech bubble
-    Displays informations about human interactions about the media
+    Displays infos about user ratings
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U0001f4ac"
     
+    @staticmethod 
+    def to_markdown_twitter_url(hashtag: str) -> str:
+        """Transforms a hashtag into a clickable link going to the twitter search page"""
+        url = utils.TWITTER_HASHTAG_URL.format(hashtag[1:])
+        return f"[{hashtag}]({url})"
+    
     async def format_page(self, menu: MediaPages, data: dict):
-        embed = await super().format_page(menu, page)
+        embed = await super().format_page(menu, data)
         to_join = []
         
         if avg_score := data["averageScore"]:
@@ -361,7 +395,57 @@ class MediaSourceSpeechBubble(TemplateMediaSource):
             to_join.append(("Favourites", f"{fav} users favourited it"))
 
         if hashtags := data["hashtag"]:
-            to_join.append(("Hashtags", hashtags))
+            hashtag_list = hashtags.split()
+            mapped = map(self.to_markdown_twitter_url, hashtag_list)
+            to_join.append(("Hashtags", ' '.join(mapped)))
+    
+        return embed(description=self.join_data(to_join) or "No community data")
+
+
+class MediaSourceTelevision(TemplateMediaSource):
+    """
+    Page displayed when the users clicks on the television 
+    Displays information
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.emoji = "\U0001f4fa"
+    
+    @staticmethod
+    def get_ep_line(ep: dict, pos_name: str):
+        """A helper function to format episodes links"""
+        return "[{0} episode - {1[site]}]({1[url]})".format(pos_name, ep)
+
+    async def format_page(self, menu: MediaPages, data: dict):
+        embed = await super().format_page(menu, data)
+        to_join = []
+
+        if (media_type := data["type"]) and (mal_id := data["idMal"]):
+            url = utils.MAL_ANIME_ID_URL.format(media_type.lower(), mal_id)
+            to_join.append(("MyAnimeList", f"[Jump url]({url})"))
+        
+        if site_url := data["siteUrl"]:
+            to_join.append(("Anilist", f"[Jump url]({url})"))
+
+        if trailer := data["trailer"]:
+            id_ = trailer["id"]
+            site = trailer["site"]
+            if site == "youtube":
+                url = utils.YOUTUBE_VIDEO_URL.format(id_)
+            else:
+                url = utils.DAILYMOTION_VIDEO_URL.format(id_)
+
+            to_join.append(("Trailer", f"[{site}]({url})"))
+        
+        if streaming_episodes := data["streamingEpisodes"]:
+            first_ep, *_, last_ep = streaming_episodes
+            
+            pos_names = ("First", "Latest")
+            eps = (first_ep, last_ep)  
+            f_eps = [self.get_ep_line(ep, pos_name) for ep, pos_name in zip(eps, pos_names)]
+            to_join.append(("Links to episodes", '\n'.join(f_eps)))
+
+        return embed(description=self.join_data(to_join) or "No watching data")
 
 
 class Anilist(commands.Cog):
@@ -404,8 +488,14 @@ class Anilist(commands.Cog):
 
         if not (results := await self.make_request(json_query, variables)):
             raise NoResultsError(query)
-
-        menu = MediaPages(results, extra_sources=(MediaSourceCalendar, MediaSourceStopwatch))
+ 
+        extra_sources = (
+            MediaSourceCalendar, 
+            MediaSourceStopwatch, 
+            MediaSourceSpeechBubble,
+            MediaSourceTelevision
+        )
+        menu = MediaPages(results, extra_sources=extra_sources)
 
         await menu.start(ctx, wait=True)
 
