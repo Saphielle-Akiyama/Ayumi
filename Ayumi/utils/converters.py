@@ -30,9 +30,9 @@ class Literal:
     A converter that tries to match a literal set of values
     """
     @staticmethod
-    def get_ratio(left: str, right: str) -> Tuple[str, float]:
+    def get_ratio(left: str, right: str) -> Tuple[float, str]:
         """Avoids having to stick everything in a single line"""
-        return left, difflib.SequenceMatcher(None, left, right).quick_ratio()
+        return difflib.SequenceMatcher(None, left, right).quick_ratio(), left
 
     def __class_getitem__(cls, values: tuple) -> Callable[[str], Optional[str]]:
         """The converter factory"""
@@ -62,7 +62,7 @@ class Literal:
             # Difflib
 
             matches = [cls.get_ratio(compared, arg) for compared in values]
-            best_match, best_ratio = max(matches, default=None, key=operator.itemgetter(1))
+            best_match, best_ratio = max(matches, default=None)
             if best_ratio > .75:
                 return best_match
 

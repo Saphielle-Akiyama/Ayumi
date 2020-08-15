@@ -25,7 +25,7 @@ import core
 import utils
 
 QUERY_TEMPLATE = """
-query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
+query ($page: Int, $perPage: Int, $asHtml: Boolean, $characterSort: [CharacterSort], %s) {
     Page (page: $page, perPage: $perPage) {
         media (%s) {
             isAdult
@@ -86,6 +86,15 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, %s) {
                 url
             }
 
+            characters(sort: $characterSort) {
+                nodes {
+                    name {
+                        full
+                        native
+                    }
+                    siteUrl
+                }
+            }
         }
     }
 }
@@ -448,6 +457,26 @@ class MediaSourceTelevision(TemplateMediaSource):
         return embed(description=self.join_data(to_join) or "No watching data")
 
 
+class MediaSourceFamily(TemplateMediaSource):
+    """
+    Displays infos about characters in the anime
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.emoji = "\U0001f46a"
+    
+    @staticmethod
+    def format_characters(data: dict):
+        name = data["name"] 
+        f_name = name["full"] or name["native"]
+        return f"[{f_name}]({data['siteUrl']})"
+
+    async def format_page(self, menu: MediaPages, data: dict):
+        embed = await super().format_page(menu, data)
+        joined = '\n'.join(map(self.format_characters, data["characters"]["nodes"]))
+        to_join = (("Characters", joined),)
+        return embed(description=self.join_data(to_join) or "No characters data")
+
 class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
@@ -459,7 +488,7 @@ class Anilist(commands.Cog):
             resp = await r.json()
 
             if r.status != 200:
-                errors = [f"{err['status']}: {err['message']}" for err in data["errors"]]
+                errors = [f"{err['status']}: {err['message']}" for err in resp["errors"]]
                 formatted_errors = '\n'.join(errors)
                 raise commands.BadArgument(formatted_errors)
 
@@ -468,7 +497,10 @@ class Anilist(commands.Cog):
     @commands.command()
     async def search(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
-        params = ["$search: String", "$sort: [MediaSort]"]
+        params = [
+            "$search: String", 
+            "$sort: [MediaSort]", 
+        ]
 
         variables = {
             "search": query,
@@ -476,6 +508,7 @@ class Anilist(commands.Cog):
             "perPage": 10,
             "asHtml": False,
             "sort": "POPULARITY_DESC",
+            "characterSort": "FAVOURITES_DESC",
         }
 
         if not ctx.is_nsfw:  # filters out hentais and stuff
@@ -485,15 +518,16 @@ class Anilist(commands.Cog):
         params = utils.to_graphql_search_param(*params)
 
         json_query = QUERY_TEMPLATE % params
-
+        
         if not (results := await self.make_request(json_query, variables)):
             raise NoResultsError(query)
- 
+        
         extra_sources = (
             MediaSourceCalendar, 
             MediaSourceStopwatch, 
             MediaSourceSpeechBubble,
-            MediaSourceTelevision
+            MediaSourceTelevision,
+            MediaSourceFamily,
         )
         menu = MediaPages(results, extra_sources=extra_sources)
 
