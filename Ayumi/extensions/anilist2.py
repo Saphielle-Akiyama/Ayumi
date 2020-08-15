@@ -181,11 +181,33 @@ class MediaPages(menus.MenuPages):
         """Same as go_to_previous_page"""
         return await super().go_to_next_page(payload)
 
-
+                  
 class PresetSource(menus.ListPageSource):
     """The base source that only shows an entry per page"""
     def __init__(self, entries: list):
         super().__init__(entries, per_page=1)
+
+
+class InformationSource(PresetSource):
+    """
+    Provides informations on how to use the menu's buttons
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.emoji = "\U00002753"
+
+    async def format_page(self, menu: MediaPages, _):
+
+        embed = utils.Embed(title="Help on how to navigate around")
+        
+        extra_emojis = [
+            f"{emoji}{source.__doc__}" 
+            for emoji, source in menu.extra_sources.items()
+        ]
+        
+
+        return embed(description='\n'.join(extra_emojis))
+
 
 
 class TemplateMediaSource(PresetSource):
@@ -271,8 +293,7 @@ class MediaSourceFront(TemplateMediaSource):
 
 class MediaSourceCalendar(TemplateMediaSource):
     """
-    Page displayed when the user clicks on the calendar
-    provides infos about airing
+    Airing informations, such as start and end date
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -326,8 +347,7 @@ class MediaSourceCalendar(TemplateMediaSource):
 
 class MediaSourceStopwatch(TemplateMediaSource):
     """
-    Page displayed when the user clicks on the stopwatch
-    provides infos about reading / watching times
+    Estimate time to read / watch the media
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -377,8 +397,7 @@ class MediaSourceStopwatch(TemplateMediaSource):
 
 class MediaSourceSpeechBubble(TemplateMediaSource):
     """
-    Page displayed when the user clicks on the speech bubble
-    Displays infos about user ratings
+    User ratings
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -413,8 +432,7 @@ class MediaSourceSpeechBubble(TemplateMediaSource):
 
 class MediaSourceTelevision(TemplateMediaSource):
     """
-    Page displayed when the users clicks on the television 
-    Displays information
+    Links to watch / read the media
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -447,8 +465,7 @@ class MediaSourceTelevision(TemplateMediaSource):
             to_join.append(("Trailer", f"[{site}]({url})"))
         
         if streaming_episodes := data["streamingEpisodes"]:
-            first_ep, *_, last_ep = streaming_episodes
-            
+            last_ep, *_, first_ep = streaming_episodes
             pos_names = ("First", "Latest")
             eps = (first_ep, last_ep)  
             f_eps = [self.get_ep_line(ep, pos_name) for ep, pos_name in zip(eps, pos_names)]
@@ -459,7 +476,7 @@ class MediaSourceTelevision(TemplateMediaSource):
 
 class MediaSourceFamily(TemplateMediaSource):
     """
-    Displays infos about characters in the anime
+    Links to this show's characters
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -511,7 +528,7 @@ class Anilist(commands.Cog):
             "characterSort": "FAVOURITES_DESC",
         }
 
-        if not ctx.is_nsfw:  # filters out hentais and stuff
+        if not ctx.is_nsfw:  
             params.append("$isAdult: Boolean")
             variables['isAdult'] = False
 
@@ -523,6 +540,7 @@ class Anilist(commands.Cog):
             raise NoResultsError(query)
         
         extra_sources = (
+            InformationSource,
             MediaSourceCalendar, 
             MediaSourceStopwatch, 
             MediaSourceSpeechBubble,
