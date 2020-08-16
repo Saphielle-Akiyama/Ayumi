@@ -533,7 +533,7 @@ class Anilist(commands.Cog):
         json_query = QUERY_TEMPLATE % params
         
         response = await self.make_request(json_query, variables)
-        if not (results := resp['data']['Page']['media']):
+        if not (results := response['data']['Page']['media']):
             raise NoResultsError(query)
 
         extra_sources = (
