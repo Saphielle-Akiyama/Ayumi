@@ -150,15 +150,15 @@ class MediaPages(menus.MenuPages):
         """
         if not isinstance(source, menus.ListPageSource):
             raise TypeError('Expected {0!r} not {1.__class__!r}.'.format(PageSource, source))
-        
-        at_index = at_index or self.current_page
+
+        at_index = self.current_page if at_index is None else at_index
         self._source = source
-        self.current_page = at_index 
+        self.current_page = at_index
 
         if self.message and show_page:
             await source._prepare_once()
             await self.show_page(at_index)
-    
+
     async def update(self, payload: discord.RawReactionActionEvent):
         """Returns to the main page everytime a movement button is pressed"""
         if str(payload.emoji) not in self.extra_sources:
@@ -181,7 +181,7 @@ class MediaPages(menus.MenuPages):
         """Same as go_to_previous_page"""
         return await super().go_to_next_page(payload)
 
-                  
+
 class PresetSource(menus.ListPageSource):
     """The base source that only shows an entry per page"""
     def __init__(self, entries: list):
@@ -189,9 +189,7 @@ class PresetSource(menus.ListPageSource):
 
 
 class InformationSource(PresetSource):
-    """
-    Provides informations on how to use the menu's buttons
-    """
+    """Provides informations on how to use the menu's buttons"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U00002753"
@@ -199,14 +197,20 @@ class InformationSource(PresetSource):
     async def format_page(self, menu: MediaPages, _):
 
         embed = utils.Embed(title="Help on how to navigate around")
-        
+
         extra_emojis = [
-            f"{emoji}{source.__doc__}" 
-            for emoji, source in menu.extra_sources.items()
+            f"{emoji} {source.__doc__}"
+            for emoji, source
+            in menu.extra_sources.items()
+            if emoji != self.emoji
         ]
         
-
-        return embed(description='\n'.join(extra_emojis))
+        text = (
+            f"You left on page {menu.current_page}, "
+            "I'll take you back there if you press any button"
+        )
+        embed.set_footer(text=text)
+        return embed(description='\n\n'.join(extra_emojis))
 
 
 
@@ -252,14 +256,14 @@ class TemplateMediaSource(PresetSource):
         if next_airing_ep := data["nextAiringEpisode"]:
             embed.timestamp = dt.datetime.fromtimestamp(next_airing_ep["airingAt"])
             footer.append("Next airing in your timezone")
-        
+
         author = menu.ctx.author
         embed.set_author(
-            name=f"Requested by {author}", 
+            name=f"Requested by {author}",
             url=utils.DM_CHANNEL_URL.format(author.id),
             icon_url=author.avatar_url
         )
-        
+
         return embed.set_footer(text=" | ".join(footer))
 
     # Used by subclasses
@@ -292,9 +296,7 @@ class MediaSourceFront(TemplateMediaSource):
 
 
 class MediaSourceCalendar(TemplateMediaSource):
-    """
-    Airing informations, such as start and end date
-    """
+    """Airing informations, such as start and end date"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U0001f4c6"  # calendar
@@ -346,9 +348,7 @@ class MediaSourceCalendar(TemplateMediaSource):
 
 
 class MediaSourceStopwatch(TemplateMediaSource):
-    """
-    Estimate time to read / watch the media
-    """
+    """Estimate time to read / watch the media"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U000023f1"
@@ -396,29 +396,27 @@ class MediaSourceStopwatch(TemplateMediaSource):
 
 
 class MediaSourceSpeechBubble(TemplateMediaSource):
-    """
-    User ratings
-    """
+    """Shows user ratings"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U0001f4ac"
-    
-    @staticmethod 
+
+    @staticmethod
     def to_markdown_twitter_url(hashtag: str) -> str:
         """Transforms a hashtag into a clickable link going to the twitter search page"""
         url = utils.TWITTER_HASHTAG_URL.format(hashtag[1:])
         return f"[{hashtag}]({url})"
-    
+
     async def format_page(self, menu: MediaPages, data: dict):
         embed = await super().format_page(menu, data)
         to_join = []
-        
+
         if avg_score := data["averageScore"]:
             to_join.append(("Average score", f"{avg_score}/100"))
-        
+
         if pop := data["popularity"]:
             to_join.append(("Popularity", f"{pop} users have it on their list"))
-        
+
         if fav := data["favourites"]:
             to_join.append(("Favourites", f"{fav} users favourited it"))
 
@@ -426,18 +424,16 @@ class MediaSourceSpeechBubble(TemplateMediaSource):
             hashtag_list = hashtags.split()
             mapped = map(self.to_markdown_twitter_url, hashtag_list)
             to_join.append(("Hashtags", ' '.join(mapped)))
-    
+
         return embed(description=self.join_data(to_join) or "No community data")
 
 
 class MediaSourceTelevision(TemplateMediaSource):
-    """
-    Links to watch / read the media
-    """
+    """Links to watch / read the media"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U0001f4fa"
-    
+
     @staticmethod
     def get_ep_line(ep: dict, pos_name: str):
         """A helper function to format episodes links"""
@@ -450,7 +446,7 @@ class MediaSourceTelevision(TemplateMediaSource):
         if (media_type := data["type"]) and (mal_id := data["idMal"]):
             url = utils.MAL_ANIME_ID_URL.format(media_type.lower(), mal_id)
             to_join.append(("MyAnimeList", f"[Jump url]({url})"))
-        
+
         if site_url := data["siteUrl"]:
             to_join.append(("Anilist", f"[Jump url]({url})"))
 
@@ -463,11 +459,11 @@ class MediaSourceTelevision(TemplateMediaSource):
                 url = utils.DAILYMOTION_VIDEO_URL.format(id_)
 
             to_join.append(("Trailer", f"[{site}]({url})"))
-        
+
         if streaming_episodes := data["streamingEpisodes"]:
             last_ep, *_, first_ep = streaming_episodes
             pos_names = ("First", "Latest")
-            eps = (first_ep, last_ep)  
+            eps = (first_ep, last_ep)
             f_eps = [self.get_ep_line(ep, pos_name) for ep, pos_name in zip(eps, pos_names)]
             to_join.append(("Links to episodes", '\n'.join(f_eps)))
 
@@ -475,16 +471,14 @@ class MediaSourceTelevision(TemplateMediaSource):
 
 
 class MediaSourceFamily(TemplateMediaSource):
-    """
-    Links to this show's characters
-    """
+    """Links to this show's characters"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.emoji = "\U0001f46a"
-    
+
     @staticmethod
     def format_characters(data: dict):
-        name = data["name"] 
+        name = data["name"]
         f_name = name["full"] or name["native"]
         return f"[{f_name}]({data['siteUrl']})"
 
@@ -493,6 +487,7 @@ class MediaSourceFamily(TemplateMediaSource):
         joined = '\n'.join(map(self.format_characters, data["characters"]["nodes"]))
         to_join = (("Characters", joined),)
         return embed(description=self.join_data(to_join) or "No characters data")
+
 
 class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
@@ -509,14 +504,15 @@ class Anilist(commands.Cog):
                 formatted_errors = '\n'.join(errors)
                 raise commands.BadArgument(formatted_errors)
 
-        return resp['data']['Page']['media']
+        return resp
 
     @commands.command()
+    @commands.max_concurrency(1, commands.BucketType.user)
     async def search(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
         params = [
-            "$search: String", 
-            "$sort: [MediaSort]", 
+            "$search: String",
+            "$sort: [MediaSort]",
         ]
 
         variables = {
@@ -528,7 +524,7 @@ class Anilist(commands.Cog):
             "characterSort": "FAVOURITES_DESC",
         }
 
-        if not ctx.is_nsfw:  
+        if not ctx.is_nsfw:
             params.append("$isAdult: Boolean")
             variables['isAdult'] = False
 
@@ -536,13 +532,14 @@ class Anilist(commands.Cog):
 
         json_query = QUERY_TEMPLATE % params
         
-        if not (results := await self.make_request(json_query, variables)):
+        response = await self.make_request(json_query, variables)
+        if not (results := resp['data']['Page']['media']):
             raise NoResultsError(query)
-        
+
         extra_sources = (
             InformationSource,
-            MediaSourceCalendar, 
-            MediaSourceStopwatch, 
+            MediaSourceCalendar,
+            MediaSourceStopwatch,
             MediaSourceSpeechBubble,
             MediaSourceTelevision,
             MediaSourceFamily,
@@ -550,6 +547,13 @@ class Anilist(commands.Cog):
         menu = MediaPages(results, extra_sources=extra_sources)
 
         await menu.start(ctx, wait=True)
+
+    @commands.command()
+    async def schedule(self, ctx: core.Context):
+        """Gives the schedule for upcoming medias"""
+        pass
+
+
 
 
 def setup(bot: core.Bot):
