@@ -12,10 +12,11 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import textwrap
 import itertools
 import operator
 import datetime as dt
-from typing import Tuple, Generator, Optional, List
+from typing import Tuple, Generator, Optional, List, Union
 
 import discord
 from discord.ext import commands, menus
@@ -24,83 +25,11 @@ import pycountry
 import core
 import utils
 
-QUERY_TEMPLATE = """
-query ($page: Int, $perPage: Int, $asHtml: Boolean, $characterSort: [CharacterSort], %s) {
-    Page (page: $page, perPage: $perPage) {
-        media (%s) {
-            isAdult
-            bannerImage
-            coverImage {
-                medium
-                extraLarge
-                color
-            }
-            title {
-                english
-                romaji
-                native
-            }
-            seasonYear
-            format
-            description(asHtml: $asHtml)
+class AnilistError(commands.CommandError):
+    """Base class for anilist related errors"""
 
-            startDate {
-                day
-                month
-                year
-            }
-            endDate {
-                day
-                month
-                year
-            }
-            nextAiringEpisode {
-                airingAt
-                timeUntilAiring
-            }
-            season
-            countryOfOrigin
-            status
-            source
 
-            episodes
-            duration
-            chapters
-            volumes
-
-            averageScore
-            popularity
-            favourites
-            hashtag
-
-            idMal
-            type
-            siteUrl
-            trailer {
-                site
-                id
-            }
-            streamingEpisodes {
-                title
-                site
-                url
-            }
-
-            characters(sort: $characterSort) {
-                nodes {
-                    name {
-                        full
-                        native
-                    }
-                    siteUrl
-                }
-            }
-        }
-    }
-}
-"""
-
-class NoResultsError(commands.CommandError):
+class NoResultsError(AnilistError):
     def __init__(self, query: str):
         self.query = query
 
@@ -108,39 +37,42 @@ class NoResultsError(commands.CommandError):
         return f"Sorry ! I couldn't find any results for \"{self.query}\""
 
 
+class NoScheduleError(AnilistError):
+    def __str__(self):
+        return f"Sorry ! I couldn't find today's schedule"
+
+
 class MediaPages(menus.MenuPages):
     """
     Our main menu, able to dynamically add buttons according
     to the list of ListPageSource that got provided
     """
-    def __init__(self, entries: list, *, extra_sources: Tuple[type],  **options):
-        self.initial_source = MediaSourceFront(entries)
+    def __init__(
+        self,
+        *, 
+        main_source: menus.ListPageSource,
+        extra_sources: Union[Tuple[menus.ListPageSource], tuple] = (), 
+        **options
+    ):
+
+        self.initial_source = main_source
         super().__init__(self.initial_source, delete_message_after=True, timeout=60)
         self.extra_sources = {}
 
-        for index, ExtraSource in enumerate(extra_sources, 2):
-            source = ExtraSource(entries)
+        for index, source in enumerate(extra_sources, 2):
             self.extra_sources[source.emoji] = source
-
-            button = menus.Button(
-                source.emoji,
-                self._extra_source_button_template,
-                position=menus.Last(index),
-            )
-
+            position = menus.Last(index)
+            button = menus.Button(source.emoji, self._extra_source_button, position=position)
             self.add_button(button)
 
-    async def _extra_source_button_template(self, payload: discord.RawReactionActionEvent):
+    async def _extra_source_button(self, payload: discord.RawReactionActionEvent):
         """A template that is used as the callback for all extra buttons"""
         emoji = str(payload.emoji)
-        if self.source is self.initial_source:
-            source = self.extra_sources[emoji]
-        elif self.source is not (new_source := self.extra_sources[emoji]):
-            source = new_source
+        new_source = self.extra_sources[emoji]
+        if self.source is self.initial_source or self.source is not new_source:
+            return await self.change_source(new_source)
         else:
-            source = self.initial_source
-
-        await self.change_source(source)
+            return await self.change_source(self.initial_source)
 
     async def change_source(self, source: menus.ListPageSource, *,
                             at_index: Optional[int] = None, show_page: bool = True):
@@ -151,7 +83,7 @@ class MediaPages(menus.MenuPages):
         if not isinstance(source, menus.ListPageSource):
             raise TypeError('Expected {0!r} not {1.__class__!r}.'.format(PageSource, source))
 
-        at_index = self.current_page if at_index is None else at_index
+        at_index = (at_index, self.current_page)[at_index is None]
         self._source = source
         self.current_page = at_index
 
@@ -183,10 +115,82 @@ class MediaPages(menus.MenuPages):
 
 
 class PresetSource(menus.ListPageSource):
-    """The base source that only shows an entry per page"""
+    """A base source that only shows an entry per page"""
     def __init__(self, entries: list):
         super().__init__(entries, per_page=1)
 
+# Media search
+
+MEDIA_SEARCH = """
+query ($page: Int, $perPage: Int, $asHtml: Boolean, $characterSort: [CharacterSort], %s) {
+    Page (page: $page, perPage: $perPage) {
+        media (%s) {
+            id
+            isAdult
+            bannerImage
+            coverImage {
+                medium
+                extraLarge
+                color
+            }
+            title {
+                english
+                romaji
+                native
+            }
+            seasonYear
+            format
+            description (asHtml: $asHtml)
+            startDate {
+                day
+                month
+                year
+            }
+            endDate {
+                day
+                month
+                year
+            }
+            nextAiringEpisode {
+                airingAt
+            }
+            season
+            countryOfOrigin
+            status
+            source
+            episodes
+            duration
+            chapters
+            volumes
+            averageScore
+            popularity
+            favourites
+            hashtag
+            idMal
+            type
+            siteUrl
+            trailer {
+                site
+                id
+            }
+            streamingEpisodes {
+                title
+                site
+                url
+            }
+            characters (sort: $characterSort) {
+                nodes {
+                    name {
+                        full
+                        native
+                    }
+                    siteUrl
+                }
+            }
+        }
+    }
+}
+"""
 
 class InformationSource(PresetSource):
     """Provides informations on how to use the menu's buttons"""
@@ -206,12 +210,11 @@ class InformationSource(PresetSource):
         ]
         
         text = (
-            f"You left on page {menu.current_page}, "
+            f"You left on page {menu.current_page + 1}, "
             "I'll take you back there if you press any button"
         )
         embed.set_footer(text=text)
         return embed(description='\n\n'.join(extra_emojis))
-
 
 
 class TemplateMediaSource(PresetSource):
@@ -254,7 +257,10 @@ class TemplateMediaSource(PresetSource):
         footer = [f"Page {menu.current_page + 1} out of {self.get_max_pages()}"]
 
         if next_airing_ep := data["nextAiringEpisode"]:
-            embed.timestamp = dt.datetime.fromtimestamp(next_airing_ep["airingAt"])
+            embed.timestamp = dt.datetime.fromtimestamp(
+                next_airing_ep["airingAt"], 
+                tz=dt.timezone.utc
+            )
             footer.append("Next airing in your timezone")
 
         author = menu.ctx.author
@@ -263,7 +269,6 @@ class TemplateMediaSource(PresetSource):
             url=utils.DM_CHANNEL_URL.format(author.id),
             icon_url=author.avatar_url
         )
-
         return embed.set_footer(text=" | ".join(footer))
 
     # Used by subclasses
@@ -271,7 +276,8 @@ class TemplateMediaSource(PresetSource):
     @staticmethod
     def _join_inner_tuples(tup: Tuple[str, str]) -> str:
         """Helper function to join title and info together"""
-        return "**{}**\n{}".format(*tup)  # will error out if we miss smth
+        name, info = tup # making sure that we have 2 values
+        return f"**{name}**\n{info}"
 
     def join_data(self, data: List[Tuple[str, str]]) -> str:
         """Formats all data in the required format"""
@@ -390,9 +396,11 @@ class MediaSourceStopwatch(TemplateMediaSource):
         elif read_flag == 2:
             # average word amount in a novel / average words read per min => 200 min / vol
             human_read_duration = self.human_duration(item * 200)
-            to_join.append(("Estimated read time (might be very inaccurate)", human_read_duration))
+            tup = ("Estimated reading time (might be very inaccurate)", human_read_duration)
+            to_join.append(tup)
 
-        return embed(description=self.join_data(to_join) or "No duration data")
+        description = self.join_data(to_join) or "No duration data"
+        return embed(description=description)
 
 
 class MediaSourceSpeechBubble(TemplateMediaSource):
@@ -489,54 +497,129 @@ class MediaSourceFamily(TemplateMediaSource):
         return embed(description=self.join_data(to_join) or "No characters data")
 
 
+SCHEDULE_SEARCH = """
+query ($page: Int, $perPage: Int, $asHtml: Boolean, $airingSort: [AiringSort], $airingAfter: Int, \
+       $characterSort: [CharacterSort]) {
+
+    Page (page: $page, perPage: $perPage) {
+        airingSchedules (airingAt_greater: $airingAfter, sort: $airingSort) {
+            media {
+                id
+                isAdult
+                bannerImage
+                coverImage {
+                    medium
+                    extraLarge
+                    color
+                }
+                title {
+                    english
+                    romaji
+                    native
+                }
+                seasonYear
+                format
+                description (asHtml: $asHtml)
+                startDate {
+                    day
+                    month
+                    year
+                }
+                endDate {
+                    day
+                    month
+                    year
+                }
+                nextAiringEpisode {
+                    airingAt
+                }
+                season
+                countryOfOrigin
+                status
+                source
+                episodes
+                duration
+                chapters
+                volumes
+                averageScore
+                popularity
+                favourites
+                hashtag
+                idMal
+                type
+                siteUrl
+                trailer {
+                    site
+                    id
+                }
+                streamingEpisodes {
+                    title
+                    site
+                    url
+                }
+                characters (sort: $characterSort) {
+                    nodes {
+                        name {
+                            full
+                            native
+                        }
+                        siteUrl
+                    }
+                }
+            }
+        }
+    }
+}
+"""
+
 class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
         self.url = "https://graphql.anilist.co"
+        self.default_variables = {
+            "page": 1,
+            "perPage": 10,
+            "asHtml": False,
+            "characterSort": "FAVOURITES_DESC"
+        }
 
     async def make_request(self, query: str, variables: dict):
         json_ = {'query': query, 'variables': variables}
         async with self.bot.session.post(self.url, json=json_) as r:
             resp = await r.json()
 
-            if r.status != 200:
-                errors = [f"{err['status']}: {err['message']}" for err in resp["errors"]]
-                formatted_errors = '\n'.join(errors)
-                raise commands.BadArgument(formatted_errors)
+            if r.status == 200:
+                return resp
 
-        return resp
+        errors = [f"{err['status']}: {err['message']}" for err in resp["errors"]]
+        formatted_errors = '\n'.join(errors)
+        raise commands.BadArgument(formatted_errors)
 
     @commands.command()
-    @commands.max_concurrency(1, commands.BucketType.user)
     async def search(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
-        params = [
-            "$search: String",
-            "$sort: [MediaSort]",
-        ]
-
-        variables = {
+        params = ["$search: String", "$sort: [MediaSort]",]
+        variables = self.default_variables.copy()
+        extra_variables = {
             "search": query,
-            "page": 1,
-            "perPage": 10,
-            "asHtml": False,
-            "sort": "POPULARITY_DESC",
-            "characterSort": "FAVOURITES_DESC",
+            "sort": "POPULARITY_DESC", 
+            "characterSort": "FAVOURITES_DESC"
         }
-
+        variables.update(extra_variables)
+             
         if not ctx.is_nsfw:
             params.append("$isAdult: Boolean")
             variables['isAdult'] = False
 
         params = utils.to_graphql_search_param(*params)
+        json_query = MEDIA_SEARCH % params
 
-        json_query = QUERY_TEMPLATE % params
-        
         response = await self.make_request(json_query, variables)
         if not (results := response['data']['Page']['media']):
             raise NoResultsError(query)
 
-        extra_sources = (
+        sources = (
+            MediaSourceFront,
             InformationSource,
             MediaSourceCalendar,
             MediaSourceStopwatch,
@@ -544,14 +627,47 @@ class Anilist(commands.Cog):
             MediaSourceTelevision,
             MediaSourceFamily,
         )
-        menu = MediaPages(results, extra_sources=extra_sources)
 
+        main_source, *extra_sources = [Source(results) for Source in sources]
+        menu = MediaPages(main_source=main_source, extra_sources=extra_sources)
         await menu.start(ctx, wait=True)
 
     @commands.command()
     async def schedule(self, ctx: core.Context):
         """Gives the schedule for upcoming medias"""
-        pass
+        params = ["$airingSort: [AiringSort]"]
+        variables = self.default_variables.copy()
+
+        float_timestamp =  dt.datetime.now(tz=dt.timezone.utc).timestamp()
+        curr_timestamp = int(float_timestamp)
+        extra_variables = {
+            "airingSort": "TIME",
+            "airingAfter": curr_timestamp
+        }
+        variables.update(extra_variables)
+        params = utils.to_graphql_search_param(*params)
+        response = await self.make_request(SCHEDULE_SEARCH, variables)
+        if not (nested_results := response["data"]["Page"]["airingSchedules"]):
+            raise NoScheduleError()
+        
+        unfiltered_results = [res["media"] for res in nested_results]
+
+        results = [res for res in unfiltered_results if (not res["isAdult"] or ctx.is_nsfw)]
+
+        sources = (
+            MediaSourceFront,
+            InformationSource,
+            MediaSourceCalendar,
+            MediaSourceStopwatch,
+            MediaSourceSpeechBubble,
+            MediaSourceTelevision,
+            MediaSourceFamily,
+        )
+
+        main_source, *extra_sources = [Source(results) for Source in sources]
+ 
+        menu = MediaPages(main_source=main_source, extra_sources=extra_sources)
+        await menu.start(ctx, wait=True)
 
 
 
