@@ -497,10 +497,11 @@ class MediaSourceFamily(TemplateMediaSource):
         return embed(description=self.join_data(to_join) or "No characters data")
 
 
+# This isn't dry at all, but it won't be fixed to keep readability up 
+
 SCHEDULE_SEARCH = """
 query ($page: Int, $perPage: Int, $asHtml: Boolean, $airingSort: [AiringSort], $airingAfter: Int, \
        $characterSort: [CharacterSort]) {
-
     Page (page: $page, perPage: $perPage) {
         airingSchedules (airingAt_greater: $airingAfter, sort: $airingSort) {
             media {
@@ -576,12 +577,22 @@ class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
         self.url = "https://graphql.anilist.co"
+        self.cooldown = commands.CooldownMapping.from_cooldown(1, 20, commands.BucketType.user)
         self.default_variables = {
             "page": 1,
             "perPage": 10,
             "asHtml": False,
             "characterSort": "FAVOURITES_DESC"
         }
+        self.sources = (
+            MediaSourceFront,
+            InformationSource,
+            MediaSourceCalendar,
+            MediaSourceStopwatch,
+            MediaSourceSpeechBubble,
+            MediaSourceTelevision,
+            MediaSourceFamily,
+        )
 
     async def make_request(self, query: str, variables: dict):
         json_ = {'query': query, 'variables': variables}
@@ -594,6 +605,13 @@ class Anilist(commands.Cog):
         errors = [f"{err['status']}: {err['message']}" for err in resp["errors"]]
         formatted_errors = '\n'.join(errors)
         raise commands.BadArgument(formatted_errors)
+    
+    async def cog_check(self, ctx: core.Context):
+        bucket = self.cooldown.get_bucket(ctx.message)
+        if retry_after := bucket.update_rate_limit():
+            raise commands.CommandOnCooldown(self.cooldown, retry_after)
+        return True
+
 
     @commands.command()
     async def search(self, ctx: core.Context, *, query: str):
@@ -618,17 +636,7 @@ class Anilist(commands.Cog):
         if not (results := response['data']['Page']['media']):
             raise NoResultsError(query)
 
-        sources = (
-            MediaSourceFront,
-            InformationSource,
-            MediaSourceCalendar,
-            MediaSourceStopwatch,
-            MediaSourceSpeechBubble,
-            MediaSourceTelevision,
-            MediaSourceFamily,
-        )
-
-        main_source, *extra_sources = [Source(results) for Source in sources]
+        main_source, *extra_sources = [Source(results) for Source in self.sources]
         menu = MediaPages(main_source=main_source, extra_sources=extra_sources)
         await menu.start(ctx, wait=True)
 
@@ -649,23 +657,11 @@ class Anilist(commands.Cog):
         response = await self.make_request(SCHEDULE_SEARCH, variables)
         if not (nested_results := response["data"]["Page"]["airingSchedules"]):
             raise NoScheduleError()
-        
+
         unfiltered_results = [res["media"] for res in nested_results]
+        results = [res for res in unfiltered_results if not res["isAdult"] or ctx.is_nsfw]
+        main_source, *extra_sources = [Source(results) for Source in self.sources]
 
-        results = [res for res in unfiltered_results if (not res["isAdult"] or ctx.is_nsfw)]
-
-        sources = (
-            MediaSourceFront,
-            InformationSource,
-            MediaSourceCalendar,
-            MediaSourceStopwatch,
-            MediaSourceSpeechBubble,
-            MediaSourceTelevision,
-            MediaSourceFamily,
-        )
-
-        main_source, *extra_sources = [Source(results) for Source in sources]
- 
         menu = MediaPages(main_source=main_source, extra_sources=extra_sources)
         await menu.start(ctx, wait=True)
 
