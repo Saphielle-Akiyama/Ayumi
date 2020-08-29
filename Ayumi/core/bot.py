@@ -84,13 +84,11 @@ class Bot(commands.Bot):
             logger.info('Connected to psql')
 
         for file in pathlib.Path('./extensions').glob('**/*.py'):
-
             ext_path = '.'.join(file.parts[:-1]) + '.' + file.stem
-
             try:
                 self.load_extension(ext_path)
             except Exception as e:
-                self.dispatch("error", exception=e)
+                print(e)
             else:
                 logger.info('Loaded %s', ext_path)
 
@@ -162,17 +160,19 @@ class Bot(commands.Bot):
         """Close all of our external connections"""
         try:
             self.redis.close()
-            self.logger.info('Closed redis')
         except Exception:
             traceback.print_exc()
+        else:
+            self.logger.info('Closed redis')
         try:
             await self.pool.close()
         except Exception:
             traceback.print_exc()
+        else:
+            self.logger.info('Pool is closed')
 
         await super().close()
 
-        self.logger.info('Finished closing the whole bot')
         try:
             await self.session.close()
         except Exception:

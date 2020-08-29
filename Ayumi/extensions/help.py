@@ -19,25 +19,20 @@ import discord
 from discord.ext import commands, menus
 
 import core
+import utils
 
-
-class IdentitySource(menus.ListPageSource):
-    def __init__(self, entries: List[discord.Embed]):
+class HelpSource(menus.ListPageSource):
+    def __init__(self, entries: List[str]):
         super().__init__(entries, per_page=1)
     
-    async def format_page(self, menu: menus.MenuPages, entry: discord.Embed):
-        """Returns the entry because it's already formatted"""
-        return entry
+    async def format_page(self, menu: menus.MenuPages, entry: str):
+        return utils.Embed(description=entry)
 
 
 class Help(commands.MinimalHelpCommand):
-    def __init__(self, cog: commands.Cog):
-        super().__init__()
-        self.cog = cog
-
     async def send_pages(self):
         """Starts a menu session with the pages (there should be only one)"""
-        source = IdentitySource(self.paginator.pages)
+        source = HelpSource(self.paginator.pages)
         menu = menus.MenuPages(source, delete_message_after=True)
         await menu.start(self.context, channel=self.get_destination(), wait=True)
     
@@ -46,7 +41,8 @@ class Meta(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
         self.original_help_command = bot.help_command
-        bot.help_command = Help(self)
+        bot.help_command = Help()
+        bot.help_command.cog = self
     
     def cog_unload(self):
         self.bot.help_command = self.original_help_command
