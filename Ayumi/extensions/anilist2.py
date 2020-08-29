@@ -573,6 +573,8 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, $airingSort: [AiringSort], $
 }
 """
 
+cog_cooldown = commands.cooldown(1, 15, commands.BucketType.member)
+
 class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
@@ -606,14 +608,8 @@ class Anilist(commands.Cog):
         formatted_errors = '\n'.join(errors)
         raise commands.BadArgument(formatted_errors)
     
-    async def cog_check(self, ctx: core.Context):
-        bucket = self.cooldown.get_bucket(ctx.message)
-        if retry_after := bucket.update_rate_limit():
-            raise commands.CommandOnCooldown(self.cooldown, retry_after)
-        return True
-
-
     @commands.command()
+    @cog_cooldown    
     async def search(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
         params = ["$search: String", "$sort: [MediaSort]",]
@@ -641,6 +637,7 @@ class Anilist(commands.Cog):
         await menu.start(ctx, wait=True)
 
     @commands.command()
+    @cog_cooldown
     async def schedule(self, ctx: core.Context):
         """Gives the schedule for upcoming medias"""
         params = ["$airingSort: [AiringSort]"]

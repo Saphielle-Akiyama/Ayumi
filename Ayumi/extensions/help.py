@@ -36,6 +36,17 @@ class Help(commands.MinimalHelpCommand):
         menu = menus.MenuPages(source, delete_message_after=True)
         await menu.start(self.context, channel=self.get_destination(), wait=True)
     
+    def get_command_signature(self, command: commands.Command):
+        return "{0.clean_prefix}{1.qualified_name} {1.signature}".format(self, command)
+    
+    async def send_command_help(self, command: commands.Command):
+        embed = utils.Embed(
+            title=self.get_command_signature(command),
+            description=command.help
+        )
+
+        await self.get_destination().send(embed=embed)
+
 
 class Meta(commands.Cog):
     def __init__(self, bot: core.Bot):
