@@ -46,12 +46,6 @@ class Literal:
             if arg in values:
                 return arg
 
-            # Might be an abbreviation
-
-            for v in values:
-                if v.startswith(arg):
-                    return v
-
             # Using it's index (would make sense for months)
 
             try:
@@ -62,7 +56,8 @@ class Literal:
             # Difflib
 
             matches = [cls.get_ratio(compared, arg) for compared in values]
-            best_match, best_ratio = max(matches, default=None)
+            default = 0, 0
+            best_ratio, best_match, = max(matches, key=operator.itemgetter(0), default=default)
             if best_ratio > .75:
                 return best_match
 

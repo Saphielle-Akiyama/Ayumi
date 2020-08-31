@@ -59,7 +59,7 @@ class MediaPages(menus.MenuPages):
         super().__init__(self.initial_source, delete_message_after=True, timeout=60)
         self.extra_sources = {}
 
-        for index, source in enumerate(extra_sources, 2):
+        for index, source in enumerate(extra_sources, 3):
             self.extra_sources[source.emoji] = source
             position = menus.Last(index)
             button = menus.Button(source.emoji, self._extra_source_button, position=position)
@@ -112,6 +112,12 @@ class MediaPages(menus.MenuPages):
     async def go_to_next_page(self, payload: discord.RawReactionActionEvent):
         """Same as go_to_previous_page"""
         return await super().go_to_next_page(payload)
+
+    @menus.button("clock emoji", position=menus.Last(2))
+    async def toggle_reminder(self, payload: discord.RawReactionActionEvent):
+        pass
+
+
 
 
 class PresetSource(menus.ListPageSource):
@@ -348,7 +354,8 @@ class MediaSourceCalendar(TemplateMediaSource):
             to_join.append(("Airing status", airing_status.lower().title()))
 
         if source := data["source"]:
-            to_join.append(("Source", source.replace('_', ' ').lower().title()))
+            f_source = source.replace('_', ' ').lower().title()
+            to_join.append(("Source", f_source))
 
         return embed(description=self.join_data(to_join) or "No airing data")
 
@@ -608,7 +615,7 @@ class Anilist(commands.Cog):
     
     async def cog_before_invoke(self, ctx: core.Context):
         bucket = self.cooldown.get_bucket(ctx.message)
-        if retry_after := buket.update_rate_limit():
+        if retry_after := bucket.update_rate_limit():
             raise commands.CommandOnCooldown(bucket, retry_after)
 
     @commands.command()

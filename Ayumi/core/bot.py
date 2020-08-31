@@ -20,13 +20,12 @@ import pathlib
 import logging
 import traceback
 import inspect
-from typing import Union, Tuple, Callable
+from typing import Union, Tuple, Callable, Optional
 
 import discord
 from discord.ext import commands, tasks
 
 import aiohttp
-import aioredis
 import asyncpg
 
 import core
@@ -40,7 +39,6 @@ LOGGING_LEVEL = logging.INFO
 EVENT_ERROR_TEMPLATE = "Exception occured in event %s :\n%s"
 COMMAND_ERROR_TEMPLATE = "Exception occured in command \"%s\"\n\nCalled with: \"%s\"\n\n%s"
 
-
 class Bot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -48,7 +46,6 @@ class Bot(commands.Bot):
         self._session = None
         self._webhook = None
         self._logger = None
-        self._redis = None
         self._pool = None
 
     async def connect(self, *args, **kwargs):
@@ -64,15 +61,6 @@ class Bot(commands.Bot):
         logger.addHandler(handler)
 
         logger.info('Started connecting to storage')
-
-        try:
-            self._redis = await aioredis.create_redis_pool(config.REDIS_URL,
-                                                           password=config.REDIS_PASSWORD)
-        except Exception as e:
-            self._redis = fallback.Fallback('redis', logger)
-            self.dispatch("error", "Redis connection", exception=e)
-        else:
-            logger.info('Connected to redis')
 
         try:
             self._pool = await asyncpg.create_pool(config.PSQL_URL,
@@ -102,10 +90,6 @@ class Bot(commands.Bot):
         return self._logger
 
     @property
-    def redis(self) -> aioredis.Redis:
-        return self._redis
-    
-    @property
     def pool(self) -> asyncpg.Connection:
         return self._pool
 
@@ -134,6 +118,16 @@ class Bot(commands.Bot):
         log_method = self.logger.warning
         log_method = kwargs.get('level', log_method)
         log_method(EVENT_ERROR_TEMPLATE, event, clean_tb)
+    
+    def fuzzy_search_commands(self, user_input: str) -> Optional[commands.Command]:
+        command_gen = self.walk_commands()
+        commands_names = [*map(str, command_gen)]
+        try:
+            command_name = utils.Literal[commands_names](user_input)
+        except commands.BadArgument:
+            return None
+        else:
+            return self.get_command(command_name)
 
     async def on_command_error(self, ctx: context.Context, error: Exception):
         """Logs errors for command, then send them into the user"""
@@ -147,10 +141,20 @@ class Bot(commands.Bot):
             clean_tb
         )
         if isinstance(error, commands.CommandNotFound):
-            return
-
-        embed = utils.Embed(title=f"An error has occured : {error.__class__.__name__}",
-                            description=utils.to_codeblocks(error, lang='py'))
+            corrected_command = self.fuzzy_search_commands(ctx.invoked_with)
+            if not corrected_command:
+                return
+            try:
+                await corrected_command.can_run(ctx)
+            except commands.CommandError:
+                return self.dispatch("command_error", ctx, error)
+            else:
+                ctx.command = corrected_command
+                return await ctx.reinvoke(call_hooks=True)
+        
+        title = f"An error has occured : {error.__class__.__name__}",
+        description = utils.to_codeblocks(error, lang='py')
+        embed = utils.Embed(title=title, description=description)
 
         embed.add_field(name="Support server", value=f"[Support server]({config.SUPPORT_SERVER})")
 
@@ -159,22 +163,15 @@ class Bot(commands.Bot):
     async def close(self):
         """Close all of our external connections"""
         try:
-            self.redis.close()
-        except Exception:
-            traceback.print_exc()
-        else:
-            self.logger.info('Closed redis')
-        try:
             await self.pool.close()
         except Exception:
             traceback.print_exc()
         else:
             self.logger.info('Pool is closed')
 
-        await super().close()
-
         try:
             await self.session.close()
         except Exception:
             traceback.print_exc()
-
+        
+        return await super().close()
