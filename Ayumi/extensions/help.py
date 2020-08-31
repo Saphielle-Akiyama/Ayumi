@@ -30,6 +30,10 @@ class HelpSource(menus.ListPageSource):
 
 
 class Help(commands.MinimalHelpCommand):
+    def __init__(self, *args, **kwargs):
+        command_attrs = {'cooldown': commands.cooldown(1, 10, commands.BucketType.member)}
+        super().__init__(command_attrs=command_attrs)
+
     async def send_pages(self):
         """Starts a menu session with the pages (there should be only one)"""
         source = HelpSource(self.paginator.pages)
@@ -39,12 +43,12 @@ class Help(commands.MinimalHelpCommand):
     def get_command_signature(self, command: commands.Command):
         return "{0.clean_prefix}{1.qualified_name} {1.signature}".format(self, command)
     
-    async def send_command_help(self, command: commands.Command):
-        embed = utils.Embed(
-            title=self.get_command_signature(command),
-            description=command.help
-        )
-
+    async def send_command_help(self, command: commandS.Command):
+        """Help for commands"""
+        title = self.get_command_signature(command)
+        embed = utils.Embed(title=title)
+        embed.add_field(name='Description', value=command.help, inline=False)
+        embed.add_field(name='Aliases', value=', '.join(command.aliases) or 'No aliases')
         await self.get_destination().send(embed=embed)
 
 

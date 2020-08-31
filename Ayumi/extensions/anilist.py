@@ -243,8 +243,7 @@ class TemplateMediaSource(PresetSource):
     async def format_page(self, menu: MediaPages, data: dict) -> utils.Embed:
         """Formats the media into a embed showing the main informations"""
         embed = utils.Embed(title=self.format_title(data))
-        size = "extraLarge" if self.__class__ is TemplateMediaSource else "medium"
-
+        size = ("medium", "extraLarge")[self.__class__ is TemplateMediaSource]
         if cover_img := data["coverImage"][size]:
             embed.set_thumbnail(url=cover_img)
 
@@ -269,7 +268,8 @@ class TemplateMediaSource(PresetSource):
             url=utils.DM_CHANNEL_URL.format(author.id),
             icon_url=author.avatar_url
         )
-        return embed.set_footer(text=" | ".join(footer))
+        f_footer = " | ".join(footer)
+        return embed.set_footer(text=f_footer)
 
     # Used by subclasses
 
@@ -573,13 +573,11 @@ query ($page: Int, $perPage: Int, $asHtml: Boolean, $airingSort: [AiringSort], $
 }
 """
 
-cog_cooldown = commands.cooldown(1, 15, commands.BucketType.member)
-
 class Anilist(commands.Cog):
     def __init__(self, bot: core.Bot):
         self.bot = bot
         self.url = "https://graphql.anilist.co"
-        self.cooldown = commands.CooldownMapping.from_cooldown(1, 20, commands.BucketType.user)
+        self.cooldown = commands.CooldownMapping.from_cooldown(1, 10, commands.BucketType.user)
         self.default_variables = {
             "page": 1,
             "perPage": 10,
@@ -608,8 +606,12 @@ class Anilist(commands.Cog):
         formatted_errors = '\n'.join(errors)
         raise commands.BadArgument(formatted_errors)
     
+    async def cog_before_invoke(self, ctx: core.Context):
+        bucket = self.cooldown.get_bucket(ctx.message)
+        if retry_after := buket.update_rate_limit():
+            raise commands.CommandOnCooldown(bucket, retry_after)
+
     @commands.command()
-    @cog_cooldown    
     async def search(self, ctx: core.Context, *, query: str):
         """Looks for infos about an anime or a manga"""
         params = ["$search: String", "$sort: [MediaSort]",]
@@ -637,7 +639,6 @@ class Anilist(commands.Cog):
         await menu.start(ctx, wait=True)
 
     @commands.command()
-    @cog_cooldown
     async def schedule(self, ctx: core.Context):
         """Gives the schedule for upcoming medias"""
         params = ["$airingSort: [AiringSort]"]
@@ -658,7 +659,7 @@ class Anilist(commands.Cog):
         unfiltered_results = [res["media"] for res in nested_results]
         results = [res for res in unfiltered_results if not res["isAdult"] or ctx.is_nsfw]
         main_source, *extra_sources = [Source(results) for Source in self.sources]
-
+        
         menu = MediaPages(main_source=main_source, extra_sources=extra_sources)
         await menu.start(ctx, wait=True)
 
