@@ -24,8 +24,8 @@ import utils
 class HelpSource(menus.ListPageSource):
     def __init__(self, entries: List[str]):
         super().__init__(entries, per_page=1)
-    
-    async def format_page(self, menu: menus.MenuPages, entry: str):
+
+    async def format_page(self, _: menus.MenuPages, entry: str):
         return utils.Embed(description=entry)
 
 
@@ -39,10 +39,10 @@ class Help(commands.MinimalHelpCommand):
         source = HelpSource(self.paginator.pages)
         menu = menus.MenuPages(source, delete_message_after=True)
         await menu.start(self.context, channel=self.get_destination(), wait=True)
-    
+
     def get_command_signature(self, command: commands.Command):
         return "{0.clean_prefix}{1.qualified_name} {1.signature}".format(self, command)
-    
+
     async def send_command_help(self, command: commands.Command):
         """Help for commands"""
         title = self.get_command_signature(command)
@@ -58,10 +58,10 @@ class Meta(commands.Cog):
         self.original_help_command = bot.help_command
         bot.help_command = Help()
         bot.help_command.cog = self
-    
+
     def cog_unload(self):
         self.bot.help_command = self.original_help_command
-        
+
 def setup(bot: core.Bot):
     cog = Meta(bot)
     bot.add_cog(cog)

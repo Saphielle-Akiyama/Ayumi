@@ -49,20 +49,26 @@ class MediaPages(menus.MenuPages):
     """
     def __init__(
         self,
-        *, 
+        *,
         main_source: menus.ListPageSource,
-        extra_sources: Union[Tuple[menus.ListPageSource], tuple] = (), 
-        **options
+        extra_sources: Union[Tuple[menus.ListPageSource], tuple] = (),
+        **options,
     ):
 
         self.initial_source = main_source
-        super().__init__(self.initial_source, delete_message_after=True, timeout=60)
+        super().__init__(self.initial_source,
+                         delete_message_after=True,
+                         timeout=60,
+                         **options)
+
         self.extra_sources = {}
 
         for index, source in enumerate(extra_sources, 3):
             self.extra_sources[source.emoji] = source
             position = menus.Last(index)
-            button = menus.Button(source.emoji, self._extra_source_button, position=position)
+            button = menus.Button(source.emoji,
+                                  self._extra_source_button,
+                                  position=position)
             self.add_button(button)
 
     async def _extra_source_button(self, payload: discord.RawReactionActionEvent):
@@ -74,16 +80,18 @@ class MediaPages(menus.MenuPages):
         else:
             return await self.change_source(self.initial_source)
 
-    async def change_source(self, source: menus.ListPageSource, *,
-                            at_index: Optional[int] = None, show_page: bool = True):
+    async def change_source(self,
+                            source: menus.ListPageSource, *,
+                            at_index: Optional[int] = None,
+                            show_page: bool = True):
         """
-        Subclassed to allow being able to display a different index
-        and to decide whether to immediatly update or not
+        Sub-classed to allow being able to display a different index
+        and to decide whether to immediately update or not
         """
         if not isinstance(source, menus.ListPageSource):
             raise TypeError('Expected {0!r} not {1.__class__!r}.'.format(PageSource, source))
 
-        at_index = (at_index, self.current_page)[at_index is None]
+        at_index = self.current_page if at_index is None else at_index
         self._source = source
         self.current_page = at_index
 
@@ -92,7 +100,7 @@ class MediaPages(menus.MenuPages):
             await self.show_page(at_index)
 
     async def update(self, payload: discord.RawReactionActionEvent):
-        """Returns to the main page everytime a movement button is pressed"""
+        """Returns to the main page every time a movement button is pressed"""
         if str(payload.emoji) not in self.extra_sources:
             await self.change_source(self.initial_source, show_page=False)
         return await super().update(payload)
@@ -104,7 +112,7 @@ class MediaPages(menus.MenuPages):
     @menus.button('\N{BLACK LEFT-POINTING TRIANGLE}\ufe0f', position=menus.First(1),
                   skip_if=_skip_single_triangle_buttons)
     async def go_to_previous_page(self, payload: discord.RawReactionActionEvent):
-        """Overriden to implement skip_if"""
+        """Overridden to implement skip_if"""
         return await super().go_to_previous_page(payload)
 
     @menus.button('\N{BLACK RIGHT-POINTING TRIANGLE}\ufe0f', position=menus.Last(0),
@@ -113,7 +121,7 @@ class MediaPages(menus.MenuPages):
         """Same as go_to_previous_page"""
         return await super().go_to_next_page(payload)
 
-    @menus.button("clock emoji", position=menus.Last(2))
+    #@menus.button("clock emote", position=menus.Last(2))
     async def toggle_reminder(self, payload: discord.RawReactionActionEvent):
         pass
 
@@ -205,16 +213,14 @@ class InformationSource(PresetSource):
         self.emoji = "\U00002753"
 
     async def format_page(self, menu: MediaPages, _):
-
         embed = utils.Embed(title="Help on how to navigate around")
-
         extra_emojis = [
             f"{emoji} {source.__doc__}"
             for emoji, source
             in menu.extra_sources.items()
             if emoji != self.emoji
         ]
-        
+
         text = (
             f"You left on page {menu.current_page + 1}, "
             "I'll take you back there if you press any button"
@@ -263,7 +269,7 @@ class TemplateMediaSource(PresetSource):
 
         if next_airing_ep := data["nextAiringEpisode"]:
             embed.timestamp = dt.datetime.fromtimestamp(
-                next_airing_ep["airingAt"], 
+                next_airing_ep["airingAt"],
                 tz=dt.timezone.utc
             )
             footer.append("Next airing in your timezone")
@@ -504,7 +510,7 @@ class MediaSourceFamily(TemplateMediaSource):
         return embed(description=self.join_data(to_join) or "No characters data")
 
 
-# This isn't dry at all, but it won't be fixed to keep readability up 
+# This isn't dry at all, but it won't be fixed to keep readability up
 
 SCHEDULE_SEARCH = """
 query ($page: Int, $perPage: Int, $asHtml: Boolean, $airingSort: [AiringSort], $airingAfter: Int, \
@@ -612,7 +618,7 @@ class Anilist(commands.Cog):
         errors = [f"{err['status']}: {err['message']}" for err in resp["errors"]]
         formatted_errors = '\n'.join(errors)
         raise commands.BadArgument(formatted_errors)
-    
+
     async def cog_before_invoke(self, ctx: core.Context):
         bucket = self.cooldown.get_bucket(ctx.message)
         if retry_after := bucket.update_rate_limit():
@@ -625,11 +631,11 @@ class Anilist(commands.Cog):
         variables = self.default_variables.copy()
         extra_variables = {
             "search": query,
-            "sort": "POPULARITY_DESC", 
+            "sort": "POPULARITY_DESC",
             "characterSort": "FAVOURITES_DESC"
         }
         variables.update(extra_variables)
-             
+
         if not ctx.is_nsfw:
             params.append("$isAdult: Boolean")
             variables['isAdult'] = False
@@ -666,7 +672,7 @@ class Anilist(commands.Cog):
         unfiltered_results = [res["media"] for res in nested_results]
         results = [res for res in unfiltered_results if not res["isAdult"] or ctx.is_nsfw]
         main_source, *extra_sources = [Source(results) for Source in self.sources]
-        
+
         menu = MediaPages(main_source=main_source, extra_sources=extra_sources)
         await menu.start(ctx, wait=True)
 
